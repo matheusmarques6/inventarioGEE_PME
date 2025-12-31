@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
-
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean;
+import { Prisma } from "@prisma/client";
 
 const createInventorySchema = z.object({
   name: z.string().min(3),
@@ -105,7 +104,7 @@ export async function POST(request: NextRequest) {
         entityId: inventory.id,
         userId: userId!,
         userEmail: dbUser.email,
-        newValue: JSON.parse(JSON.stringify(inventory)) as JsonValue,
+        newValue: JSON.parse(JSON.stringify(inventory)) as Prisma.InputJsonValue,
       },
     });
 
