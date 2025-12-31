@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { getUser } from "@/lib/supabase/server";
 import { prisma } from "@/lib/db/client";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -23,24 +22,9 @@ export default async function DashboardLayout({
     include: { organization: true },
   });
 
-  // Get current path from headers
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") || "";
-  const isOnboardingPage = pathname.includes("/onboarding");
-
   // If user doesn't exist in database, redirect to onboarding
-  if (!dbUser && !isOnboardingPage) {
-    redirect("/onboarding");
-  }
-
-  // If on onboarding page and already has org, redirect to dashboard
-  if (dbUser && isOnboardingPage) {
-    redirect("/dashboard");
-  }
-
-  // For onboarding page, render without sidebar
   if (!dbUser) {
-    return <>{children}</>;
+    redirect("/onboarding");
   }
 
   return (

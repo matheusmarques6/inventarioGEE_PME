@@ -43,9 +43,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Add pathname header for layout checks
-  supabaseResponse.headers.set("x-pathname", request.nextUrl.pathname);
-
   // Define public routes that don't require authentication
   const isPublicRoute =
     request.nextUrl.pathname === "/" ||
