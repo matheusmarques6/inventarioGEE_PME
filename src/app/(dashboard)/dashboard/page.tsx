@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import {
   Card,
   CardContent,
@@ -20,8 +19,6 @@ import {
 import Link from "next/link";
 
 export default async function DashboardPage() {
-  const { userId } = await auth();
-
   // TODO: Fetch real data from database
   const stats = {
     totalEmissions: 12450.5,

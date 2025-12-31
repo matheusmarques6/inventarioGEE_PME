@@ -167,10 +167,10 @@ export function convertArea(
 ): Decimal {
   const toHa: Record<string, number> = {
     m2: 0.0001,
-    m²: 0.0001,
+    "m\u00B2": 0.0001,
     ha: 1,
     km2: 100,
-    km²: 100,
+    "km\u00B2": 100,
     acre: 0.404686,
     alq: 2.42, // alqueire paulista
   };

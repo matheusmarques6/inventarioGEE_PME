@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db/client";
+import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
@@ -38,9 +38,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const { id: inventoryId } = await params;
@@ -50,19 +53,11 @@ export async function GET(
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "50");
 
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     // Verify access to inventory
     const inventory = await prisma.inventory.findFirst({
       where: {
         id: inventoryId,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
     });
 
@@ -116,28 +111,23 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const { id: inventoryId } = await params;
     const body = await request.json();
     const data = createActivityDataSchema.parse(body);
 
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     // Verify access to inventory
     const inventory = await prisma.inventory.findFirst({
       where: {
         id: inventoryId,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
     });
 
@@ -216,8 +206,8 @@ export async function POST(
         action: "CREATE",
         entityType: "ActivityData",
         entityId: activityData.id,
-        userId,
-        userEmail: user.email,
+        userId: userId!,
+        userEmail: dbUser.email,
         newValue: {
           activityData,
           emissionResult: savedResult,

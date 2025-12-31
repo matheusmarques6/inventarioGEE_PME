@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db/client";
+import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 
 const createInventorySchema = z.object({
@@ -21,26 +21,16 @@ const createInventorySchema = z.object({
 // GET /api/inventories - List all inventories for the organization
 export async function GET() {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Get user's organization
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-      include: { organization: true },
-    });
-
-    if (!user) {
+    const { dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
       return NextResponse.json(
-        { error: "User not found. Please complete onboarding." },
-        { status: 404 }
+        { error: error || "User not found. Please complete onboarding." },
+        { status: error ? 401 : 404 }
       );
     }
 
     const inventories = await prisma.inventory.findMany({
-      where: { organizationId: user.organizationId },
+      where: { organizationId: dbUser.organizationId },
       orderBy: { baseYear: "desc" },
       include: {
         _count: {
@@ -62,31 +52,21 @@ export async function GET() {
 // POST /api/inventories - Create a new inventory
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found. Please complete onboarding." },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const body = await request.json();
     const data = createInventorySchema.parse(body);
 
-    // Get user's organization
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-      include: { organization: true },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "User not found. Please complete onboarding." },
-        { status: 404 }
-      );
-    }
-
     // Check if inventory for this year already exists
     const existingInventory = await prisma.inventory.findFirst({
       where: {
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
         baseYear: data.baseYear,
       },
     });
@@ -101,7 +81,7 @@ export async function POST(request: NextRequest) {
     // Create inventory
     const inventory = await prisma.inventory.create({
       data: {
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
         name: data.name,
         baseYear: data.baseYear,
         reportingPeriod: data.reportingPeriod,
@@ -121,8 +101,8 @@ export async function POST(request: NextRequest) {
         action: "CREATE",
         entityType: "Inventory",
         entityId: inventory.id,
-        userId: userId,
-        userEmail: user.email,
+        userId: userId!,
+        userEmail: dbUser.email,
         newValue: inventory as unknown as Record<string, unknown>,
       },
     });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db/client";
+import { requireAuth } from "@/lib/supabase/api";
 import Decimal from "decimal.js";
 import { createCalculationEngine } from "@/lib/calculation-engine";
 
@@ -10,26 +10,21 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const { id: inventoryId } = await params;
-
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
 
     // Get inventory with all activity data
     const inventory = await prisma.inventory.findFirst({
       where: {
         id: inventoryId,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
       include: {
         activityData: true,
@@ -47,7 +42,7 @@ export async function POST(
     const engine = createCalculationEngine({
       gwpReference: inventory.gwpReference,
       year: inventory.baseYear,
-      organizationId: user.organizationId,
+      organizationId: dbUser.organizationId,
       inventoryId: inventory.id,
     });
 
@@ -138,8 +133,8 @@ export async function POST(
         action: "CALCULATE",
         entityType: "Inventory",
         entityId: inventoryId,
-        userId,
-        userEmail: user.email,
+        userId: userId!,
+        userEmail: dbUser.email,
         newValue: {
           totalScope1: totalScope1.toNumber(),
           totalScope2: totalScope2.toNumber(),

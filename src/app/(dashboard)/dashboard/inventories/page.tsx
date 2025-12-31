@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import {
   Card,
@@ -74,8 +73,6 @@ const statusConfig: Record<
 };
 
 export default async function InventoriesPage() {
-  const { userId } = await auth();
-
   return (
     <div className="space-y-6">
       {/* Page Header */}

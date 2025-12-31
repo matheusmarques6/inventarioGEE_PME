@@ -33,7 +33,7 @@ model Organization {
 
 model User {
   id              String   @id @default(cuid())
-  clerkId         String   @unique
+  supabaseId      String   @unique  // Supabase auth user id
   email           String   @unique
   name            String
   role            UserRole @default(VIEWER)
@@ -43,7 +43,7 @@ model User {
   updatedAt       DateTime @updatedAt
 
   @@index([organizationId])
-  @@index([clerkId])
+  @@index([supabaseId])
 }
 
 enum UserRole {

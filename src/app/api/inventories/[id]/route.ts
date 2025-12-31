@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/db/client";
+import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 
 const updateInventorySchema = z.object({
@@ -23,25 +23,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const { id } = await params;
 
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     const inventory = await prisma.inventory.findFirst({
       where: {
         id,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
       include: {
         activityData: {
@@ -85,28 +80,23 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
     const { id } = await params;
     const body = await request.json();
     const data = updateInventorySchema.parse(body);
 
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     // Check access
     const existingInventory = await prisma.inventory.findFirst({
       where: {
         id,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
     });
 
@@ -133,8 +123,8 @@ export async function PATCH(
         action: "UPDATE",
         entityType: "Inventory",
         entityId: inventory.id,
-        userId: userId,
-        userEmail: user.email,
+        userId: userId!,
+        userEmail: dbUser.email,
         previousValue: existingInventory as unknown as Record<string, unknown>,
         newValue: inventory as unknown as Record<string, unknown>,
       },
@@ -162,29 +152,28 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
     }
 
-    const { id } = await params;
-
-    const user = await prisma.user.findUnique({
-      where: { clerkId: userId },
-    });
-
-    if (!user || user.role !== "ADMIN") {
+    if (dbUser.role !== "ADMIN") {
       return NextResponse.json(
         { error: "Only admins can delete inventories" },
         { status: 403 }
       );
     }
 
+    const { id } = await params;
+
     // Check access
     const existingInventory = await prisma.inventory.findFirst({
       where: {
         id,
-        organizationId: user.organizationId,
+        organizationId: dbUser.organizationId,
       },
     });
 
@@ -206,8 +195,8 @@ export async function DELETE(
         action: "DELETE",
         entityType: "Inventory",
         entityId: id,
-        userId: userId,
-        userEmail: user.email,
+        userId: userId!,
+        userEmail: dbUser.email,
         previousValue: existingInventory as unknown as Record<string, unknown>,
       },
     });
