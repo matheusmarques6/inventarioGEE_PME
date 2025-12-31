@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
+import { Prisma } from "@prisma/client";
 
 const createActivityDataSchema = z.object({
   category: z.string(),
@@ -159,7 +160,7 @@ export async function POST(
         evidenceUrl: data.evidenceUrl,
         notes: data.notes,
         unitId: data.unitId,
-        metadata: data.metadata,
+        metadata: data.metadata as Prisma.InputJsonValue | undefined,
         createdBy: userId,
       },
     });
