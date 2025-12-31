@@ -11,10 +11,10 @@ interface Inventory {
   includeScope1: boolean;
   includeScope2: boolean;
   includeScope3: boolean;
-  totalScope1?: number;
-  totalScope2?: number;
-  totalScope3?: number;
-  totalBiogenic?: number;
+  totalEmissionsScope1?: number;
+  totalEmissionsScope2?: number;
+  totalEmissionsScope3?: number;
+  totalBiogenicEmissions?: number;
   totalRemovals?: number;
   _count?: {
     activityData: number;

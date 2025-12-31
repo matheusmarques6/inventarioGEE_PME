@@ -50,14 +50,14 @@ export function KPICards() {
         } else {
           // Use inventory totals as fallback
           setStats({
-            totalEmissions: (currentInventory.totalScope1 || 0) +
-                           (currentInventory.totalScope2 || 0) +
-                           (currentInventory.totalScope3 || 0),
-            scope1: currentInventory.totalScope1 || 0,
-            scope2: currentInventory.totalScope2 || 0,
-            scope3: currentInventory.totalScope3 || 0,
-            biogenic: currentInventory.totalBiogenic || 0,
-            removals: currentInventory.totalRemovals || 0,
+            totalEmissions: Number(currentInventory.totalEmissionsScope1 || 0) +
+                           Number(currentInventory.totalEmissionsScope2 || 0) +
+                           Number(currentInventory.totalEmissionsScope3 || 0),
+            scope1: Number(currentInventory.totalEmissionsScope1 || 0),
+            scope2: Number(currentInventory.totalEmissionsScope2 || 0),
+            scope3: Number(currentInventory.totalEmissionsScope3 || 0),
+            biogenic: Number(currentInventory.totalBiogenicEmissions || 0),
+            removals: Number(currentInventory.totalRemovals || 0),
           });
         }
       } catch (error) {

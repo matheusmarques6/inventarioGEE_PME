@@ -90,19 +90,19 @@ export async function GET(
 
     // Update inventory totals if they've changed
     if (
-      inventory.totalScope1 !== scope1 ||
-      inventory.totalScope2 !== scope2 ||
-      inventory.totalScope3 !== scope3 ||
-      inventory.totalBiogenic !== biogenic ||
-      inventory.totalRemovals !== removals
+      Number(inventory.totalEmissionsScope1 || 0) !== scope1 ||
+      Number(inventory.totalEmissionsScope2 || 0) !== scope2 ||
+      Number(inventory.totalEmissionsScope3 || 0) !== scope3 ||
+      Number(inventory.totalBiogenicEmissions || 0) !== biogenic ||
+      Number(inventory.totalRemovals || 0) !== removals
     ) {
       await prisma.inventory.update({
         where: { id: inventoryId },
         data: {
-          totalScope1: scope1,
-          totalScope2: scope2,
-          totalScope3: scope3,
-          totalBiogenic: biogenic,
+          totalEmissionsScope1: scope1,
+          totalEmissionsScope2: scope2,
+          totalEmissionsScope3: scope3,
+          totalBiogenicEmissions: biogenic,
           totalRemovals: removals,
         },
       });
