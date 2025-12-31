@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 const updateInventorySchema = z.object({
   name: z.string().min(3).optional(),
@@ -126,8 +127,8 @@ export async function PATCH(
         entityId: inventory.id,
         userId: userId!,
         userEmail: dbUser.email,
-        previousValue: JSON.parse(JSON.stringify(existingInventory)) as Prisma.InputJsonValue,
-        newValue: JSON.parse(JSON.stringify(inventory)) as Prisma.InputJsonValue,
+        previousValue: JSON.parse(JSON.stringify(existingInventory)) as JsonValue,
+        newValue: JSON.parse(JSON.stringify(inventory)) as JsonValue,
       },
     });
 
@@ -198,7 +199,7 @@ export async function DELETE(
         entityId: id,
         userId: userId!,
         userEmail: dbUser.email,
-        previousValue: JSON.parse(JSON.stringify(existingInventory)) as Prisma.InputJsonValue,
+        previousValue: JSON.parse(JSON.stringify(existingInventory)) as JsonValue,
       },
     });
 

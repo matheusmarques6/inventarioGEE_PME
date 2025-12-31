@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -35,6 +36,7 @@ type FormData = z.infer<typeof formSchema>;
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -72,8 +74,9 @@ export default function LoginPage() {
         description: "Redirecionando...",
       });
 
-      // Simple redirect after login
-      window.location.href = "/dashboard";
+      // Use router.refresh() to update server state, then redirect
+      router.refresh();
+      router.push("/dashboard");
 
     } catch (error) {
       console.error("Login error:", error);
