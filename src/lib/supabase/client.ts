@@ -1,8 +1,24 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+let supabaseClient: ReturnType<typeof createBrowserClient> | null = null;
+
 export function createClient() {
-  return createBrowserClient(
+  if (supabaseClient) {
+    return supabaseClient;
+  }
+
+  supabaseClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookieOptions: {
+        // Ensure cookies work properly
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      },
+    }
   );
+
+  return supabaseClient;
 }
