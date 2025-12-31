@@ -49,12 +49,13 @@ export default function LoginPage() {
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
         email: data.email,
         password: data.password,
       });
 
       if (error) {
+        setIsLoading(false);
         toast({
           title: "Erro ao entrar",
           description: error.message === "Invalid login credentials"
@@ -65,23 +66,36 @@ export default function LoginPage() {
         return;
       }
 
+      if (!authData.session) {
+        setIsLoading(false);
+        toast({
+          title: "Erro ao entrar",
+          description: "Não foi possível criar a sessão. Tente novamente.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       toast({
         title: "Login realizado com sucesso!",
-        description: "Redirecionando para o dashboard...",
+        description: "Redirecionando...",
       });
 
-      // Use hard redirect to ensure cookies are properly recognized
-      window.location.href = "/dashboard";
+      // Wait for cookies to be properly set, then redirect
+      setTimeout(() => {
+        window.location.replace("/dashboard");
+      }, 500);
+
     } catch (error) {
       console.error("Login error:", error);
+      setIsLoading(false);
       toast({
         title: "Erro inesperado",
         description: "Tente novamente mais tarde.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
+    // Note: Don't set isLoading to false on success - we're navigating away
   }
 
   return (
