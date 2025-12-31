@@ -1,0 +1,431 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ORGANIZAÇÃO E USUÁRIOS
+// ============================================
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  cnpj          String   @unique
+  sector        String   // Industrial, Florestal, Agrícola, etc.
+  address       String?
+  city          String?
+  state         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  inventories   Inventory[]
+  units         OperationalUnit[]
+
+  @@index([cnpj])
+}
+
+model User {
+  id              String   @id @default(cuid())
+  clerkId         String   @unique
+  email           String   @unique
+  name            String
+  role            UserRole @default(VIEWER)
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([clerkId])
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+  AUDITOR
+}
+
+// ============================================
+// INVENTÁRIO
+// ============================================
+
+model Inventory {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String?   // Optional display name
+  baseYear        Int       // Ano base do inventário (ex: 2024)
+  reportingPeriod String    // "2024", "2024-Q1", etc.
+  gwpReference    GWPReference @default(AR5) // AR4, AR5, AR6
+  status          InventoryStatus @default(DRAFT)
+
+  // Configurações de fronteira
+  consolidationApproach ConsolidationApproach @default(OPERATIONAL_CONTROL)
+  includeScope1         Boolean @default(true)
+  includeScope2         Boolean @default(true)
+  includeScope3         Boolean @default(false)
+
+  // Resultados consolidados (cache)
+  totalEmissionsScope1   Decimal? @db.Decimal(20, 6)
+  totalEmissionsScope2   Decimal? @db.Decimal(20, 6)
+  totalEmissionsScope3   Decimal? @db.Decimal(20, 6)
+  totalBiogenicEmissions Decimal? @db.Decimal(20, 6)
+  totalRemovals          Decimal? @db.Decimal(20, 6)
+
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  submittedAt     DateTime?
+  verifiedAt      DateTime?
+
+  // Relações
+  activityData    ActivityData[]
+  emissionResults EmissionResult[]
+  reports         Report[]
+  auditLogs       AuditLog[]
+
+  @@index([organizationId])
+  @@index([baseYear])
+  @@index([status])
+}
+
+enum InventoryStatus {
+  DRAFT
+  IN_REVIEW
+  SUBMITTED
+  VERIFIED
+  PUBLISHED
+}
+
+enum GWPReference {
+  AR4
+  AR5
+  AR6
+}
+
+enum ConsolidationApproach {
+  OPERATIONAL_CONTROL
+  FINANCIAL_CONTROL
+  EQUITY_SHARE
+}
+
+// ============================================
+// UNIDADES OPERACIONAIS
+// ============================================
+
+model OperationalUnit {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name            String   // Ex: "Araucária", "Jaguariaíva", "MS"
+  type            UnitType // INDUSTRIAL, FLORESTAL, ADMINISTRATIVO
+  state           String?  // UF
+  city            String?
+  address         String?
+
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  activityData    ActivityData[]
+
+  @@index([organizationId])
+}
+
+enum UnitType {
+  INDUSTRIAL
+  FLORESTAL
+  ADMINISTRATIVO
+  AGRICOLA
+  LOGISTICO
+}
+
+// ============================================
+// DADOS DE ATIVIDADE (ENTRADA)
+// ============================================
+
+model ActivityData {
+  id              String   @id @default(cuid())
+  inventoryId     String
+  inventory       Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  unitId          String?
+  unit            OperationalUnit? @relation(fields: [unitId], references: [id])
+
+  category        EmissionCategory
+  subcategory     String?  // Categoria específica dentro do escopo
+  scope           Int      // 1, 2 ou 3
+
+  // Dados de atividade
+  sourceDescription String  // Descrição da fonte de emissão
+  activityType    String    // Combustão estacionária, móvel, processo, etc.
+
+  // Valores de atividade
+  quantity        Decimal  @db.Decimal(20, 6)
+  quantityUnit    String   // kg, m³, kWh, km, etc.
+
+  // Período
+  month           Int?     // 1-12, null = anual
+  year            Int
+
+  // Metadados
+  dataSource      String?  // SAP, Excel, Manual
+  dataQuality     DataQuality @default(PRIMARY)
+  uncertainty     Decimal? @db.Decimal(5, 4) // 0.02 = 2%
+
+  // Rastreabilidade
+  evidenceUrl     String?
+  notes           String?
+
+  // Fatores utilizados (snapshot)
+  emissionFactorId String?
+  emissionFactor  EmissionFactor? @relation(fields: [emissionFactorId], references: [id])
+
+  // Additional data stored as JSON for category-specific fields
+  metadata        Json?    // For forest data, fire data, transport details, etc.
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+
+  emissionResults EmissionResult[]
+
+  @@index([inventoryId])
+  @@index([category])
+  @@index([scope])
+}
+
+enum EmissionCategory {
+  // Escopo 1
+  STATIONARY_COMBUSTION      // Combustão estacionária
+  MOBILE_COMBUSTION          // Combustão móvel
+  FUGITIVE_EMISSIONS         // Emissões fugitivas
+  PROCESS_EMISSIONS          // Emissões de processo
+  AGRICULTURAL               // Agrícolas (fertilizantes)
+  LULUCF                     // Uso da terra e florestas
+  WASTE_INTERNAL             // Tratamento de resíduos interno
+
+  // Escopo 2
+  PURCHASED_ELECTRICITY      // Eletricidade comprada
+  PURCHASED_HEAT             // Calor/vapor comprado
+
+  // Escopo 3
+  PURCHASED_GOODS            // Bens e serviços adquiridos
+  CAPITAL_GOODS              // Bens de capital
+  FUEL_ENERGY_ACTIVITIES     // Atividades de combustível/energia
+  UPSTREAM_TRANSPORT         // Transporte upstream
+  DOWNSTREAM_TRANSPORT       // Transporte downstream
+  WASTE_EXTERNAL             // Resíduos gerados (externo)
+  BUSINESS_TRAVEL            // Viagens a negócio
+  EMPLOYEE_COMMUTING         // Transporte de colaboradores
+  LEASED_ASSETS              // Ativos arrendados
+  INVESTMENTS                // Investimentos
+}
+
+enum DataQuality {
+  PRIMARY           // Dados medidos diretamente
+  PRIMARY_THIRD     // Dados primários de terceiros
+  SECONDARY_CALC    // Calculado com base em dados reais
+  SECONDARY_ASSUMED // Premissas adotadas
+  EXTRAPOLATED      // Extrapolação
+}
+
+// ============================================
+// RESULTADOS DE EMISSÃO (SAÍDA)
+// ============================================
+
+model EmissionResult {
+  id              String   @id @default(cuid())
+  inventoryId     String
+  inventory       Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  activityDataId  String
+  activityData    ActivityData @relation(fields: [activityDataId], references: [id], onDelete: Cascade)
+
+  // Emissões por gás (em kg)
+  co2Mass         Decimal? @db.Decimal(20, 6) // kg CO2
+  ch4Mass         Decimal? @db.Decimal(20, 6) // kg CH4
+  n2oMass         Decimal? @db.Decimal(20, 6) // kg N2O
+  hfcMass         Decimal? @db.Decimal(20, 6) // kg HFC
+  pfcMass         Decimal? @db.Decimal(20, 6) // kg PFC
+  sf6Mass         Decimal? @db.Decimal(20, 6) // kg SF6
+  nf3Mass         Decimal? @db.Decimal(20, 6) // kg NF3
+
+  // Emissões em CO2e (toneladas)
+  co2Equivalent   Decimal  @db.Decimal(20, 6) // tCO2e total
+  biogenicCo2     Decimal? @db.Decimal(20, 6) // tCO2 biogênico
+  removals        Decimal? @db.Decimal(20, 6) // tCO2 removido (negativo)
+
+  // Classificação
+  scope           Int
+  category        EmissionCategory
+  isKyotoGas      Boolean  @default(true) // Gás do Protocolo de Quioto
+
+  // Incerteza propagada
+  uncertainty     Decimal? @db.Decimal(10, 8)
+
+  // Metadata
+  calculatedAt    DateTime @default(now())
+  calculationVersion String @default("1.0")
+
+  // Snapshot of factors used
+  gwpReference    GWPReference
+  factorsSnapshot Json?    // Snapshot of emission factors used
+
+  @@index([inventoryId])
+  @@index([activityDataId])
+  @@index([scope])
+}
+
+// ============================================
+// FATORES DE EMISSÃO
+// ============================================
+
+model EmissionFactor {
+  id              String   @id @default(cuid())
+
+  // Identificação
+  name            String
+  category        String   // Combustível, Eletricidade, Processo, etc.
+  subcategory     String?
+
+  // Valores dos fatores
+  co2Factor       Decimal? @db.Decimal(20, 10)
+  ch4Factor       Decimal? @db.Decimal(20, 10)
+  n2oFactor       Decimal? @db.Decimal(20, 10)
+
+  // Unidades
+  factorUnit      String   // ton CO2/GJ, kg CO2/kWh, etc.
+  activityUnit    String   // GJ, kWh, m³, etc.
+
+  // Metadados
+  source          String   // IPCC, MCTI, BEN, etc.
+  reference       String?  // Referência bibliográfica completa
+  validFrom       DateTime
+  validTo         DateTime?
+  region          String?  // BR, Global, etc.
+
+  // Energia (para combustíveis)
+  density         Decimal? @db.Decimal(10, 6) // kg/m³ ou kg/L
+  pci             Decimal? @db.Decimal(10, 4) // Poder calorífico inferior
+  energyContent   Decimal? @db.Decimal(10, 6) // GJ/m³
+
+  // Biocombustíveis
+  isRenewable     Boolean  @default(false)
+  biofuelBlend    Decimal? @db.Decimal(5, 4) // % de biocombustível
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  activityData    ActivityData[]
+
+  @@index([category])
+  @@index([name])
+}
+
+// ============================================
+// GWP (POTENCIAL DE AQUECIMENTO GLOBAL)
+// ============================================
+
+model GWPFactor {
+  id              String   @id @default(cuid())
+
+  gasName         String   @unique // CO2, CH4, N2O, HFC-134a, etc.
+  gasFormula      String?  // Fórmula química
+  gasFamily       GasFamily
+
+  gwpAR4          Int?
+  gwpAR5          Int?
+  gwpAR6          Int?
+
+  isKyotoGas      Boolean  @default(true)
+  isMontrealGas   Boolean  @default(false)
+
+  @@index([gasFamily])
+}
+
+enum GasFamily {
+  CO2
+  CH4
+  N2O
+  HFC
+  PFC
+  SF6
+  NF3
+  CFC
+  HCFC
+  OTHER
+}
+
+// ============================================
+// RELATÓRIOS
+// ============================================
+
+model Report {
+  id              String   @id @default(cuid())
+  inventoryId     String
+  inventory       Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  type            ReportType
+  format          ReportFormat
+
+  fileUrl         String?
+  fileName        String?
+
+  generatedAt     DateTime @default(now())
+  generatedBy     String?
+
+  @@index([inventoryId])
+}
+
+enum ReportType {
+  GHG_PROTOCOL
+  GRI
+  CDP
+  SBCE
+  EXECUTIVE_SUMMARY
+  CUSTOM
+}
+
+enum ReportFormat {
+  PDF
+  XLSX
+  DOCX
+  JSON
+}
+
+// ============================================
+// AUDITORIA
+// ============================================
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  inventoryId     String?
+  inventory       Inventory? @relation(fields: [inventoryId], references: [id], onDelete: SetNull)
+
+  action          String   // CREATE, UPDATE, DELETE, CALCULATE
+  entityType      String   // ActivityData, EmissionResult, etc.
+  entityId        String
+
+  previousValue   Json?
+  newValue        Json?
+
+  userId          String
+  userEmail       String?
+  ipAddress       String?
+  userAgent       String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([inventoryId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
