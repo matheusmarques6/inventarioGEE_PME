@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db/client";
 import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean;
 
 const updateInventorySchema = z.object({
   name: z.string().min(3).optional(),

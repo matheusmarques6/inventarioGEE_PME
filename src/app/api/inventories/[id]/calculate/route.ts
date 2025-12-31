@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/supabase/api";
 import Decimal from "decimal.js";
 import { createCalculationEngine } from "@/lib/calculation-engine";
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean;
 
 // POST /api/inventories/[id]/calculate - Recalculate all emissions
 export async function POST(

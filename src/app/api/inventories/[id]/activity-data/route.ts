@@ -5,7 +5,7 @@ import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean;
 
 const createActivityDataSchema = z.object({
   category: z.string(),
