@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/client";
 import { requireAuth } from "@/lib/supabase/api";
 import Decimal from "decimal.js";
 import { createCalculationEngine } from "@/lib/calculation-engine";
+import { Prisma } from "@prisma/client";
 
 // POST /api/inventories/[id]/calculate - Recalculate all emissions
 export async function POST(
@@ -91,7 +92,7 @@ export async function POST(
           isKyotoGas: result.isKyotoGas,
           uncertainty: result.uncertainty,
           gwpReference: inventory.gwpReference,
-          factorsSnapshot: result.factorsSnapshot,
+          factorsSnapshot: result.factorsSnapshot as Prisma.InputJsonValue | undefined,
         },
       });
 
@@ -142,7 +143,7 @@ export async function POST(
           totalBiogenic: totalBiogenic.toNumber(),
           totalRemovals: totalRemovals.toNumber(),
           resultsCount: results.length,
-        },
+        } as Prisma.InputJsonValue,
       },
     });
 

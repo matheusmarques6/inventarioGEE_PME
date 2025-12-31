@@ -196,7 +196,7 @@ export async function POST(
         category: data.category as never,
         isKyotoGas: emissionResult.isKyotoGas,
         gwpReference: inventory.gwpReference,
-        factorsSnapshot: emissionResult.factorsSnapshot,
+        factorsSnapshot: emissionResult.factorsSnapshot as Prisma.InputJsonValue | undefined,
       },
     });
 
@@ -210,9 +210,9 @@ export async function POST(
         userId: userId!,
         userEmail: dbUser.email,
         newValue: {
-          activityData,
-          emissionResult: savedResult,
-        },
+          activityData: JSON.parse(JSON.stringify(activityData)),
+          emissionResult: JSON.parse(JSON.stringify(savedResult)),
+        } as Prisma.InputJsonValue,
       },
     });
 
