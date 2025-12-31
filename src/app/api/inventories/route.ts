@@ -1,124 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { requireAuth } from "@/lib/supabase/api";
-import { z } from "zod";
-import { Prisma } from "@prisma/client";
 
-const createInventorySchema = z.object({
-  name: z.string().min(3),
-  baseYear: z.number().min(2000).max(2100),
-  reportingPeriod: z.string(),
-  gwpReference: z.enum(["AR4", "AR5", "AR6"]),
-  consolidationApproach: z.enum([
-    "OPERATIONAL_CONTROL",
-    "FINANCIAL_CONTROL",
-    "EQUITY_SHARE",
-  ]),
-  includeScope1: z.boolean().default(true),
-  includeScope2: z.boolean().default(true),
-  includeScope3: z.boolean().default(false),
-});
+// Mock data - no database required for now
+const mockInventories = [
+  {
+    id: "inv-001",
+    organizationId: "org-001",
+    name: "Inventário 2024",
+    baseYear: 2024,
+    reportingPeriod: "2024",
+    gwpReference: "AR5",
+    status: "DRAFT",
+    consolidationApproach: "OPERATIONAL_CONTROL",
+    includeScope1: true,
+    includeScope2: true,
+    includeScope3: false,
+    totalEmissionsScope1: 1250.5,
+    totalEmissionsScope2: 450.2,
+    totalEmissionsScope3: 0,
+    totalBiogenicEmissions: 50.0,
+    totalRemovals: 100.0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _count: {
+      activityData: 15,
+      emissionResults: 15,
+    },
+  },
+  {
+    id: "inv-002",
+    organizationId: "org-001",
+    name: "Inventário 2023",
+    baseYear: 2023,
+    reportingPeriod: "2023",
+    gwpReference: "AR5",
+    status: "PUBLISHED",
+    consolidationApproach: "OPERATIONAL_CONTROL",
+    includeScope1: true,
+    includeScope2: true,
+    includeScope3: true,
+    totalEmissionsScope1: 1180.3,
+    totalEmissionsScope2: 420.8,
+    totalEmissionsScope3: 890.5,
+    totalBiogenicEmissions: 45.0,
+    totalRemovals: 95.0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _count: {
+      activityData: 42,
+      emissionResults: 42,
+    },
+  },
+];
 
-// GET /api/inventories - List all inventories for the organization
+// GET /api/inventories
 export async function GET() {
-  try {
-    const { dbUser, error } = await requireAuth();
-    if (error || !dbUser) {
-      return NextResponse.json(
-        { error: error || "User not found. Please complete onboarding." },
-        { status: error ? 401 : 404 }
-      );
-    }
-
-    const inventories = await prisma.inventory.findMany({
-      where: { organizationId: dbUser.organizationId },
-      orderBy: { baseYear: "desc" },
-      include: {
-        _count: {
-          select: { activityData: true, emissionResults: true },
-        },
-      },
-    });
-
-    return NextResponse.json(inventories);
-  } catch (error) {
-    console.error("Error fetching inventories:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(mockInventories);
 }
 
-// POST /api/inventories - Create a new inventory
+// POST /api/inventories
 export async function POST(request: NextRequest) {
   try {
-    const { userId, dbUser, error } = await requireAuth();
-    if (error || !dbUser) {
-      return NextResponse.json(
-        { error: error || "User not found. Please complete onboarding." },
-        { status: error ? 401 : 404 }
-      );
-    }
-
     const body = await request.json();
-    const data = createInventorySchema.parse(body);
 
-    // Check if inventory for this year already exists
-    const existingInventory = await prisma.inventory.findFirst({
-      where: {
-        organizationId: dbUser.organizationId,
-        baseYear: data.baseYear,
+    const newInventory = {
+      id: `inv-${Date.now()}`,
+      organizationId: "org-001",
+      name: body.name || `Inventário ${body.baseYear}`,
+      baseYear: body.baseYear,
+      reportingPeriod: body.reportingPeriod || String(body.baseYear),
+      gwpReference: body.gwpReference || "AR5",
+      status: "DRAFT",
+      consolidationApproach: body.consolidationApproach || "OPERATIONAL_CONTROL",
+      includeScope1: body.includeScope1 ?? true,
+      includeScope2: body.includeScope2 ?? true,
+      includeScope3: body.includeScope3 ?? false,
+      totalEmissionsScope1: 0,
+      totalEmissionsScope2: 0,
+      totalEmissionsScope3: 0,
+      totalBiogenicEmissions: 0,
+      totalRemovals: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      _count: {
+        activityData: 0,
+        emissionResults: 0,
       },
-    });
+    };
 
-    if (existingInventory) {
-      return NextResponse.json(
-        { error: `Já existe um inventário para o ano ${data.baseYear}` },
-        { status: 400 }
-      );
-    }
-
-    // Create inventory
-    const inventory = await prisma.inventory.create({
-      data: {
-        organizationId: dbUser.organizationId,
-        name: data.name,
-        baseYear: data.baseYear,
-        reportingPeriod: data.reportingPeriod,
-        gwpReference: data.gwpReference,
-        consolidationApproach: data.consolidationApproach,
-        includeScope1: data.includeScope1,
-        includeScope2: data.includeScope2,
-        includeScope3: data.includeScope3,
-        status: "DRAFT",
-      },
-    });
-
-    // Log the action
-    await prisma.auditLog.create({
-      data: {
-        inventoryId: inventory.id,
-        action: "CREATE",
-        entityType: "Inventory",
-        entityId: inventory.id,
-        userId: userId!,
-        userEmail: dbUser.email,
-        newValue: JSON.parse(JSON.stringify(inventory)) as Prisma.InputJsonValue,
-      },
-    });
-
-    return NextResponse.json(inventory, { status: 201 });
+    return NextResponse.json(newInventory, { status: 201 });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Invalid data", details: error.errors },
-        { status: 400 }
-      );
-    }
     console.error("Error creating inventory:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Erro ao criar inventário" },
       { status: 500 }
     );
   }

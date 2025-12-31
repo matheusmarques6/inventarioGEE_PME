@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User } from "@supabase/supabase-js";
-import { Bell, Menu, Search, LogOut, Settings, User as UserIcon, ChevronDown } from "lucide-react";
+import { Bell, Menu, Search, Settings, User as UserIcon, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,33 +13,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { createClient } from "@/lib/supabase/client";
 import { MobileSidebar } from "./sidebar";
 
 interface HeaderProps {
-  user: User;
+  user: {
+    id: string;
+    email: string;
+  };
 }
 
 export function Header({ user }: HeaderProps) {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  const handleSignOut = async () => {
-    setIsLoading(true);
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  };
 
   const getInitials = (email: string) => {
     return email.substring(0, 2).toUpperCase();
   };
 
-  const displayName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário";
+  const displayName = user.email?.split("@")[0] || "Usuário";
 
   return (
     <>
@@ -85,7 +77,6 @@ export function Header({ user }: HeaderProps) {
                 className="flex items-center gap-2 px-2 hover:bg-gray-100"
               >
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.user_metadata?.avatar_url} />
                   <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
                     {getInitials(user.email || "US")}
                   </AvatarFallback>
@@ -113,15 +104,6 @@ export function Header({ user }: HeaderProps) {
               <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
                 <Settings className="mr-2 h-4 w-4" />
                 Configurações
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleSignOut}
-                disabled={isLoading}
-                className="text-red-600 focus:text-red-600 focus:bg-red-50"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                {isLoading ? "Saindo..." : "Sair"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
