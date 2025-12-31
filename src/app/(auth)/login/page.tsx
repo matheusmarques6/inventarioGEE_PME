@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -34,7 +35,9 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 export default function LoginPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -44,11 +47,35 @@ export default function LoginPage() {
     },
   });
 
+  // Check if user is already logged in on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session) {
+          // User is already logged in, redirect to dashboard
+          router.replace("/dashboard");
+          return;
+        }
+      } catch (error) {
+        console.error("Session check error:", error);
+      } finally {
+        setIsCheckingSession(false);
+      }
+    };
+
+    checkSession();
+  }, [router]);
+
   async function onSubmit(data: FormData) {
     setIsLoading(true);
 
     try {
       const supabase = createClient();
+
+      // Sign in
       const { data: authData, error } = await supabase.auth.signInWithPassword({
         email: data.email,
         password: data.password,
@@ -76,15 +103,27 @@ export default function LoginPage() {
         return;
       }
 
+      // Verify session was created
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        setIsLoading(false);
+        toast({
+          title: "Erro de sessão",
+          description: "A sessão não foi persistida corretamente. Tente novamente.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       toast({
         title: "Login realizado com sucesso!",
         description: "Redirecionando...",
       });
 
-      // Wait for cookies to be properly set, then redirect
-      setTimeout(() => {
-        window.location.replace("/dashboard");
-      }, 500);
+      // Use router.push with refresh to ensure middleware sees the new session
+      router.push("/dashboard");
+      router.refresh();
 
     } catch (error) {
       console.error("Login error:", error);
@@ -95,7 +134,15 @@ export default function LoginPage() {
         variant: "destructive",
       });
     }
-    // Note: Don't set isLoading to false on success - we're navigating away
+  }
+
+  // Show loading while checking session
+  if (isCheckingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
   }
 
   return (
