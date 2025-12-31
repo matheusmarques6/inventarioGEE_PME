@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -35,7 +34,6 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>;
 
 export default function LoginPage() {
-  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<FormData>({
@@ -72,8 +70,8 @@ export default function LoginPage() {
         description: "Redirecionando para o dashboard...",
       });
 
-      router.push("/dashboard");
-      router.refresh();
+      // Use hard redirect to ensure cookies are properly recognized
+      window.location.href = "/dashboard";
     } catch (error) {
       console.error("Login error:", error);
       toast({
