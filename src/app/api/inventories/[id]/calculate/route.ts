@@ -92,7 +92,7 @@ export async function POST(
           isKyotoGas: result.isKyotoGas,
           uncertainty: result.uncertainty,
           gwpReference: inventory.gwpReference,
-          factorsSnapshot: result.factorsSnapshot ?? Prisma.DbNull,
+          factorsSnapshot: (result.factorsSnapshot as Prisma.InputJsonValue) ?? Prisma.DbNull,
         },
       });
 
