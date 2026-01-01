@@ -160,7 +160,7 @@ export async function POST(
         evidenceUrl: data.evidenceUrl,
         notes: data.notes,
         unitId: data.unitId,
-        metadata: (data.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+        metadata: data.metadata ?? null,
         createdBy: userId,
       },
     });
@@ -196,7 +196,7 @@ export async function POST(
         category: data.category as never,
         isKyotoGas: emissionResult.isKyotoGas,
         gwpReference: inventory.gwpReference,
-        factorsSnapshot: (emissionResult.factorsSnapshot ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+        factorsSnapshot: emissionResult.factorsSnapshot ?? null,
       },
     });
 
@@ -212,7 +212,7 @@ export async function POST(
         newValue: {
           activityData: JSON.parse(JSON.stringify(activityData)),
           emissionResult: JSON.parse(JSON.stringify(savedResult)),
-        } as Prisma.InputJsonValue,
+        },
       },
     });
 

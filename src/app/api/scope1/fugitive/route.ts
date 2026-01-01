@@ -3,7 +3,12 @@ import { prisma } from "@/lib/db/client";
 import { z } from "zod";
 import { calculateFugitiveEmissions, FugitiveResult } from "@/lib/calculations/scope1";
 import { GWP_REFRIGERANTS, isKyotoGas } from "@/lib/emission-factors/gwp";
-import { Prisma } from "@prisma/client";
+
+// Type alias for Prisma transaction client
+type PrismaTransactionClient = Omit<
+  typeof prisma,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
 
 // Schema for fugitive emissions input
 const fugitiveEmissionsSchema = z.object({
@@ -86,7 +91,7 @@ export async function POST(request: NextRequest) {
     const isKyoto = isKyotoGas(validatedData.gasName);
 
     // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
       // Create activity data
       const activityData = await tx.activityData.create({
         data: {
@@ -97,13 +102,13 @@ export async function POST(request: NextRequest) {
           scope: 1,
           sourceDescription: validatedData.sourceDescription,
           activityType: "Emissões fugitivas",
-          quantity: new Prisma.Decimal(validatedData.quantity),
+          quantity: validatedData.quantity,
           quantityUnit: validatedData.unit,
           month: validatedData.month,
           year: validatedData.year,
           dataSource: validatedData.dataSource,
           dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? new Prisma.Decimal(validatedData.uncertainty) : null,
+          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
           notes: validatedData.notes,
           metadata: {
             gasName: validatedData.gasName,
@@ -113,7 +118,7 @@ export async function POST(request: NextRequest) {
             gwp: emissionResult.gwp,
             gasFamily: gasInfo?.family || "Unknown",
             isKyotoGas: isKyoto,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -122,8 +127,8 @@ export async function POST(request: NextRequest) {
         data: {
           inventoryId: validatedData.inventoryId,
           activityDataId: activityData.id,
-          hfcMass: new Prisma.Decimal(validatedData.quantity),
-          co2Equivalent: new Prisma.Decimal(emissionResult.totalTCO2e),
+          hfcMass: validatedData.quantity,
+          co2Equivalent: emissionResult.totalTCO2e,
           scope: 1,
           category: "FUGITIVE_EMISSIONS",
           isKyotoGas: isKyoto,
@@ -134,7 +139,7 @@ export async function POST(request: NextRequest) {
             quantityKg: validatedData.quantity,
             kyotoTCO2e: emissionResult.kyotoTCO2e,
             nonKyotoTCO2e: emissionResult.nonKyotoTCO2e,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -176,7 +181,7 @@ export async function OPTIONS() {
 }
 
 // Helper function to update inventory totals
-async function updateInventoryTotals(tx: Prisma.TransactionClient, inventoryId: string) {
+async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
   const scope1Total = await tx.emissionResult.aggregate({
     where: { inventoryId, scope: 1 },
     _sum: { co2Equivalent: true, biogenicCo2: true },

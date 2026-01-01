@@ -92,7 +92,7 @@ export async function POST(
           isKyotoGas: result.isKyotoGas,
           uncertainty: result.uncertainty,
           gwpReference: inventory.gwpReference,
-          factorsSnapshot: (result.factorsSnapshot ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          factorsSnapshot: result.factorsSnapshot ?? null,
         },
       });
 
@@ -143,7 +143,7 @@ export async function POST(
           totalBiogenic: totalBiogenic.toNumber(),
           totalRemovals: totalRemovals.toNumber(),
           resultsCount: results.length,
-        } as Prisma.InputJsonValue,
+        },
       },
     });
 

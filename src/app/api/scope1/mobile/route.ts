@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
 import { calculateMobileCombustion, CombustionResult } from "@/lib/calculations/scope1";
-import { Prisma } from "@prisma/client";
+
+// Type alias for Prisma transaction client
+type PrismaTransactionClient = Omit<
+  typeof prisma,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
 
 // Schema for mobile combustion input
 const mobileCombustionSchema = z.object({
@@ -91,7 +96,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
       // Create activity data
       const activityData = await tx.activityData.create({
         data: {
@@ -102,13 +107,13 @@ export async function POST(request: NextRequest) {
           scope: 1,
           sourceDescription: validatedData.sourceDescription,
           activityType: validatedData.activityType,
-          quantity: new Prisma.Decimal(validatedData.quantity),
+          quantity: validatedData.quantity,
           quantityUnit: validatedData.unit,
           month: validatedData.month,
           year: validatedData.year,
           dataSource: validatedData.dataSource,
           dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? new Prisma.Decimal(validatedData.uncertainty) : null,
+          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
           notes: validatedData.notes,
           metadata: {
             fuelName: validatedData.fuelName,
@@ -120,7 +125,7 @@ export async function POST(request: NextRequest) {
             biodieselPercentage: validatedData.biodieselPercentage,
             consumptionM3: emissionResult.consumptionM3,
             energyGJ: emissionResult.energyGJ,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -129,11 +134,11 @@ export async function POST(request: NextRequest) {
         data: {
           inventoryId: validatedData.inventoryId,
           activityDataId: activityData.id,
-          co2Mass: new Prisma.Decimal(emissionResult.co2Kg),
-          ch4Mass: new Prisma.Decimal(emissionResult.ch4Kg),
-          n2oMass: new Prisma.Decimal(emissionResult.n2oKg),
-          co2Equivalent: new Prisma.Decimal(emissionResult.totalTCO2e),
-          biogenicCo2: new Prisma.Decimal(emissionResult.biogenicTCO2e),
+          co2Mass: emissionResult.co2Kg,
+          ch4Mass: emissionResult.ch4Kg,
+          n2oMass: emissionResult.n2oKg,
+          co2Equivalent: emissionResult.totalTCO2e,
+          biogenicCo2: emissionResult.biogenicTCO2e,
           scope: 1,
           category: "MOBILE_COMBUSTION",
           isKyotoGas: true,
@@ -145,7 +150,7 @@ export async function POST(request: NextRequest) {
             ch4Kg: emissionResult.ch4Kg,
             n2oKg: emissionResult.n2oKg,
             co2BiogenicKg: emissionResult.co2BiogenicKg,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -174,7 +179,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Helper function to update inventory totals
-async function updateInventoryTotals(tx: Prisma.TransactionClient, inventoryId: string) {
+async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
   const scope1Total = await tx.emissionResult.aggregate({
     where: { inventoryId, scope: 1 },
     _sum: { co2Equivalent: true, biogenicCo2: true },

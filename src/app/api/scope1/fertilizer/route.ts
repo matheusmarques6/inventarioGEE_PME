@@ -7,7 +7,12 @@ import {
   FertilizerEmissionResult,
   LimestoneEmissionResult,
 } from "@/lib/emission-factors/fertilizers";
-import { Prisma } from "@prisma/client";
+
+// Type alias for Prisma transaction client
+type PrismaTransactionClient = Omit<
+  typeof prisma,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
 
 // Schema for fertilizer input
 const fertilizerSchema = z.object({
@@ -142,7 +147,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
       const subcategory = validatedData.fertilizerType === "nitrogen"
         ? validatedData.fertilizerName || "Fertilizante nitrogenado"
         : `Calcário ${validatedData.limestoneType === "calcitic" ? "calcítico" : "dolomítico"}`;
@@ -157,13 +162,13 @@ export async function POST(request: NextRequest) {
           scope: 1,
           sourceDescription: validatedData.sourceDescription,
           activityType: "Aplicação de fertilizantes/calcário",
-          quantity: new Prisma.Decimal(quantityKg),
+          quantity: quantityKg,
           quantityUnit: "kg",
           month: validatedData.month,
           year: validatedData.year,
           dataSource: validatedData.dataSource,
           dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? new Prisma.Decimal(validatedData.uncertainty) : null,
+          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
           notes: validatedData.notes,
           metadata: {
             fertilizerType: validatedData.fertilizerType,
@@ -178,7 +183,7 @@ export async function POST(request: NextRequest) {
             originalQuantity: validatedData.quantity,
             originalUnit: validatedData.unit,
             calculatedDetails: emissionResult.details,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -187,9 +192,9 @@ export async function POST(request: NextRequest) {
         data: {
           inventoryId: validatedData.inventoryId,
           activityDataId: activityData.id,
-          co2Mass: new Prisma.Decimal(emissionResult.co2Kg),
-          n2oMass: emissionResult.n2oKg ? new Prisma.Decimal(emissionResult.n2oKg) : null,
-          co2Equivalent: new Prisma.Decimal(emissionResult.totalTCO2e),
+          co2Mass: emissionResult.co2Kg,
+          n2oMass: emissionResult.n2oKg ? emissionResult.n2oKg : null,
+          co2Equivalent: emissionResult.totalTCO2e,
           scope: 1,
           category: "AGRICULTURAL",
           isKyotoGas: true,
@@ -199,7 +204,7 @@ export async function POST(request: NextRequest) {
             co2Kg: emissionResult.co2Kg,
             n2oKg: emissionResult.n2oKg,
             totalTCO2e: emissionResult.totalTCO2e,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -228,7 +233,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Helper function to update inventory totals
-async function updateInventoryTotals(tx: Prisma.TransactionClient, inventoryId: string) {
+async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
   const scope1Total = await tx.emissionResult.aggregate({
     where: { inventoryId, scope: 1 },
     _sum: { co2Equivalent: true, biogenicCo2: true },

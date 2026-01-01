@@ -5,6 +5,12 @@ import { Prisma } from "@prisma/client";
 import { calculateStationaryCombustion, calculateMobileCombustion, calculateFugitiveEmissions } from "@/lib/calculations/scope1";
 import { calculateFertilizerEmissions, calculateLimestoneEmissions } from "@/lib/emission-factors/fertilizers";
 
+// Type alias for Prisma transaction client
+type PrismaTransactionClient = Omit<
+  typeof prisma,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
+
 interface ImportResult {
   success: boolean;
   totalRows: number;
@@ -153,7 +159,7 @@ async function processStationarySheet(
       });
 
       // Save to database
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
         const activityData = await tx.activityData.create({
           data: {
             inventoryId,
@@ -162,7 +168,7 @@ async function processStationarySheet(
             scope: 1,
             sourceDescription: `${source} - ${activity}`,
             activityType: "Combustão estacionária",
-            quantity: new Prisma.Decimal(quantity),
+            quantity: quantity,
             quantityUnit: unit,
             year,
             dataSource: "Importação Excel",
@@ -174,7 +180,7 @@ async function processStationarySheet(
               unitName,
               energyGJ: emissions.energyGJ,
               importedAt: new Date().toISOString(),
-            } as Prisma.InputJsonValue,
+            },
           },
         });
 
@@ -182,11 +188,11 @@ async function processStationarySheet(
           data: {
             inventoryId,
             activityDataId: activityData.id,
-            co2Mass: new Prisma.Decimal(emissions.co2Kg),
-            ch4Mass: new Prisma.Decimal(emissions.ch4Kg),
-            n2oMass: new Prisma.Decimal(emissions.n2oKg),
-            co2Equivalent: new Prisma.Decimal(emissions.totalTCO2e),
-            biogenicCo2: new Prisma.Decimal(emissions.biogenicTCO2e),
+            co2Mass: emissions.co2Kg,
+            ch4Mass: emissions.ch4Kg,
+            n2oMass: emissions.n2oKg,
+            co2Equivalent: emissions.totalTCO2e,
+            biogenicCo2: emissions.biogenicTCO2e,
             scope: 1,
             category: "STATIONARY_COMBUSTION",
             isKyotoGas: true,
@@ -266,7 +272,7 @@ async function processMobileSheet(
       );
 
       // Save to database
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
         const activityData = await tx.activityData.create({
           data: {
             inventoryId,
@@ -275,7 +281,7 @@ async function processMobileSheet(
             scope: 1,
             sourceDescription: `${source} - ${activity}`,
             activityType: "Combustão móvel",
-            quantity: new Prisma.Decimal(quantity),
+            quantity: quantity,
             quantityUnit: unit,
             year,
             dataSource: "Importação Excel",
@@ -289,7 +295,7 @@ async function processMobileSheet(
               isOffroad,
               energyGJ: emissions.energyGJ,
               importedAt: new Date().toISOString(),
-            } as Prisma.InputJsonValue,
+            },
           },
         });
 
@@ -297,11 +303,11 @@ async function processMobileSheet(
           data: {
             inventoryId,
             activityDataId: activityData.id,
-            co2Mass: new Prisma.Decimal(emissions.co2Kg),
-            ch4Mass: new Prisma.Decimal(emissions.ch4Kg),
-            n2oMass: new Prisma.Decimal(emissions.n2oKg),
-            co2Equivalent: new Prisma.Decimal(emissions.totalTCO2e),
-            biogenicCo2: new Prisma.Decimal(emissions.biogenicTCO2e),
+            co2Mass: emissions.co2Kg,
+            ch4Mass: emissions.ch4Kg,
+            n2oMass: emissions.n2oKg,
+            co2Equivalent: emissions.totalTCO2e,
+            biogenicCo2: emissions.biogenicTCO2e,
             scope: 1,
             category: "MOBILE_COMBUSTION",
             isKyotoGas: true,
@@ -369,7 +375,7 @@ async function processFugitiveSheet(
       });
 
       // Save to database
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
         const activityData = await tx.activityData.create({
           data: {
             inventoryId,
@@ -378,7 +384,7 @@ async function processFugitiveSheet(
             scope: 1,
             sourceDescription: commercialName || gasName,
             activityType: "Emissões fugitivas",
-            quantity: new Prisma.Decimal(quantity),
+            quantity: quantity,
             quantityUnit: "kg",
             year,
             dataSource: "Importação Excel",
@@ -390,7 +396,7 @@ async function processFugitiveSheet(
               gwp: emissions.gwp,
               isKyoto: emissions.isKyoto,
               importedAt: new Date().toISOString(),
-            } as Prisma.InputJsonValue,
+            },
           },
         });
 
@@ -398,8 +404,8 @@ async function processFugitiveSheet(
           data: {
             inventoryId,
             activityDataId: activityData.id,
-            hfcMass: new Prisma.Decimal(quantity),
-            co2Equivalent: new Prisma.Decimal(emissions.totalTCO2e),
+            hfcMass: quantity,
+            co2Equivalent: emissions.totalTCO2e,
             scope: 1,
             category: "FUGITIVE_EMISSIONS",
             isKyotoGas: emissions.isKyoto,
@@ -475,7 +481,7 @@ async function processFertilizerSheet(
           quantity,
         });
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransactionClient) => {
           const activityData = await tx.activityData.create({
             data: {
               inventoryId,
@@ -484,7 +490,7 @@ async function processFertilizerSheet(
               scope: 1,
               sourceDescription: fertilizerName,
               activityType: "Aplicação de calcário",
-              quantity: new Prisma.Decimal(quantity),
+              quantity: quantity,
               quantityUnit: "kg",
               year,
               dataSource: "Importação Excel",
@@ -497,7 +503,7 @@ async function processFertilizerSheet(
                 unitName,
                 caco3Equivalent: emissions.caco3Equivalent,
                 importedAt: new Date().toISOString(),
-              } as Prisma.InputJsonValue,
+              },
             },
           });
 
@@ -505,8 +511,8 @@ async function processFertilizerSheet(
             data: {
               inventoryId,
               activityDataId: activityData.id,
-              co2Mass: new Prisma.Decimal(emissions.co2Kg),
-              co2Equivalent: new Prisma.Decimal(emissions.totalTCO2e),
+              co2Mass: emissions.co2Kg,
+              co2Equivalent: emissions.totalTCO2e,
               scope: 1,
               category: "AGRICULTURAL",
               isKyotoGas: true,
@@ -526,7 +532,7 @@ async function processFertilizerSheet(
           quantity,
         });
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransactionClient) => {
           const activityData = await tx.activityData.create({
             data: {
               inventoryId,
@@ -535,7 +541,7 @@ async function processFertilizerSheet(
               scope: 1,
               sourceDescription: fertilizerName,
               activityType: "Aplicação de fertilizante",
-              quantity: new Prisma.Decimal(quantity),
+              quantity: quantity,
               quantityUnit: "kg",
               year,
               dataSource: "Importação Excel",
@@ -547,7 +553,7 @@ async function processFertilizerSheet(
                 unitName,
                 nitrogenApplied: emissions.nitrogenApplied,
                 importedAt: new Date().toISOString(),
-              } as Prisma.InputJsonValue,
+              },
             },
           });
 
@@ -555,9 +561,9 @@ async function processFertilizerSheet(
             data: {
               inventoryId,
               activityDataId: activityData.id,
-              co2Mass: new Prisma.Decimal(emissions.co2Kg),
-              n2oMass: new Prisma.Decimal(emissions.n2oKg),
-              co2Equivalent: new Prisma.Decimal(emissions.totalTCO2e),
+              co2Mass: emissions.co2Kg,
+              n2oMass: emissions.n2oKg,
+              co2Equivalent: emissions.totalTCO2e,
               scope: 1,
               category: "AGRICULTURAL",
               isKyotoGas: true,

@@ -126,8 +126,8 @@ export async function PATCH(
         entityId: inventory.id,
         userId: userId!,
         userEmail: dbUser.email,
-        previousValue: JSON.parse(JSON.stringify(existingInventory)) as Prisma.InputJsonValue,
-        newValue: JSON.parse(JSON.stringify(inventory)) as Prisma.InputJsonValue,
+        previousValue: JSON.parse(JSON.stringify(existingInventory)),
+        newValue: JSON.parse(JSON.stringify(inventory)),
       },
     });
 
@@ -198,7 +198,7 @@ export async function DELETE(
         entityId: id,
         userId: userId!,
         userEmail: dbUser.email,
-        previousValue: JSON.parse(JSON.stringify(existingInventory)) as Prisma.InputJsonValue,
+        previousValue: JSON.parse(JSON.stringify(existingInventory)),
       },
     });
 
