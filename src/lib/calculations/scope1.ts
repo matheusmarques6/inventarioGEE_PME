@@ -1,7 +1,7 @@
 // Scope 1 Emissions Calculator
 // Implements GHG Protocol methodology for direct emissions
 
-import { GWP, getRefrigerantGWP, isKyotoGas } from "../emission-factors/gwp";
+import { GWP, getRefrigerantGWP, isKyotoGas, GWP_REFRIGERANTS } from "../emission-factors/gwp";
 import { getFuel, FuelEmissionFactor, STATIONARY_FUELS, MOBILE_FUELS_ROAD } from "../emission-factors/fuels";
 import {
   calculateFertilizerEmissions,
@@ -432,8 +432,7 @@ export function getAvailableFuelsForUI(): { value: string; label: string; type: 
  * Get list of available refrigerant gases for UI dropdown
  */
 export function getAvailableRefrigerantsForUI(): { value: string; label: string; gwp: number; family: string }[] {
-  const { GWP_REFRIGERANTS } = require("../emission-factors/gwp");
-  return Object.entries(GWP_REFRIGERANTS).map(([name, info]: [string, { gwp: number; family: string }]) => ({
+  return Object.entries(GWP_REFRIGERANTS).map(([name, info]) => ({
     value: name,
     label: name,
     gwp: info.gwp,
