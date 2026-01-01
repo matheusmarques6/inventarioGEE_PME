@@ -117,7 +117,7 @@ async function processStationarySheet(
   if (!sheetName) return null;
 
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
 
   const errors: Array<{ row: number; error: string }> = [];
   let imported = 0;
@@ -222,7 +222,7 @@ async function processMobileSheet(
   if (!sheetName) return null;
 
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
 
   const errors: Array<{ row: number; error: string }> = [];
   let imported = 0;
@@ -337,7 +337,7 @@ async function processFugitiveSheet(
   if (!sheetName) return null;
 
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
 
   const errors: Array<{ row: number; error: string }> = [];
   let imported = 0;
@@ -435,7 +435,7 @@ async function processFertilizerSheet(
   if (!sheetName) return null;
 
   const worksheet = workbook.Sheets[sheetName];
-  const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { header: 1 });
+  const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1 });
 
   const errors: Array<{ row: number; error: string }> = [];
   let imported = 0;
