@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Menu, Search, Settings, User as UserIcon, ChevronDown } from "lucide-react";
+import { Bell, Menu, Search, Settings, User as UserIcon, ChevronDown, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,23 +16,68 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { MobileSidebar } from "./sidebar";
+import { createClient } from "@/lib/supabase/client";
+import { toast } from "@/components/ui/use-toast";
 
 interface HeaderProps {
   user: {
     id: string;
     email: string;
+    name?: string;
   };
 }
 
 export function Header({ user }: HeaderProps) {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const getInitials = (email: string) => {
+  const getInitials = (name: string | undefined, email: string) => {
+    if (name) {
+      const parts = name.split(" ");
+      if (parts.length >= 2) {
+        return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+      }
+      return name.substring(0, 2).toUpperCase();
+    }
     return email.substring(0, 2).toUpperCase();
   };
 
-  const displayName = user.email?.split("@")[0] || "Usuário";
+  const displayName = user.name || user.email?.split("@")[0] || "Usuário";
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        toast({
+          title: "Erro ao sair",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Até logo!",
+        description: "Você saiu da sua conta com sucesso.",
+      });
+
+      router.refresh();
+      router.push("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+      toast({
+        title: "Erro inesperado",
+        description: "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <>
@@ -78,7 +123,7 @@ export function Header({ user }: HeaderProps) {
               >
                 <Avatar className="h-8 w-8">
                   <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
-                    {getInitials(user.email || "US")}
+                    {getInitials(user.name, user.email || "US")}
                   </AvatarFallback>
                 </Avatar>
                 <div className="hidden md:flex flex-col items-start">
@@ -104,6 +149,15 @@ export function Header({ user }: HeaderProps) {
               <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
                 <Settings className="mr-2 h-4 w-4" />
                 Configurações
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                {isLoggingOut ? "Saindo..." : "Sair"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
