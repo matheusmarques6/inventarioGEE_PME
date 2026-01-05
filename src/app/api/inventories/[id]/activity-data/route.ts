@@ -31,22 +31,42 @@ function transformActivityData(data: ActivityData) {
     updatedAt: data.updated_at,
     createdBy: data.created_by,
     unit: data.unit,
-    emissionResults: data.emission_results?.map(er => ({
-      id: er.id,
-      inventoryId: er.inventory_id,
-      activityDataId: er.activity_data_id,
-      co2Mass: er.co2_mass,
-      ch4Mass: er.ch4_mass,
-      n2oMass: er.n2o_mass,
-      co2Equivalent: er.co2_equivalent,
-      biogenicCo2: er.biogenic_co2,
-      removals: er.removals,
-      scope: er.scope,
-      category: er.category,
-      isKyotoGas: er.is_kyoto_gas,
-      gwpReference: er.gwp_reference,
-      factorsSnapshot: er.factors_snapshot,
-    })),
+    emissionResults: data.emission_results?.map(transformEmissionResult),
+  };
+}
+
+// Transform emission result to camelCase
+function transformEmissionResult(er: {
+  id: string;
+  inventory_id: string;
+  activity_data_id: string;
+  co2_mass?: number | null;
+  ch4_mass?: number | null;
+  n2o_mass?: number | null;
+  co2_equivalent: number;
+  biogenic_co2?: number | null;
+  removals?: number | null;
+  scope: number;
+  category: string;
+  is_kyoto_gas: boolean;
+  gwp_reference: string;
+  factors_snapshot?: Record<string, unknown> | null;
+}) {
+  return {
+    id: er.id,
+    inventoryId: er.inventory_id,
+    activityDataId: er.activity_data_id,
+    co2Mass: er.co2_mass,
+    ch4Mass: er.ch4_mass,
+    n2oMass: er.n2o_mass,
+    co2Equivalent: er.co2_equivalent,
+    biogenicCo2: er.biogenic_co2,
+    removals: er.removals,
+    scope: er.scope,
+    category: er.category,
+    isKyotoGas: er.is_kyoto_gas,
+    gwpReference: er.gwp_reference,
+    factorsSnapshot: er.factors_snapshot,
   };
 }
 
@@ -287,7 +307,7 @@ export async function POST(
     return NextResponse.json(
       {
         activityData,
-        emissionResult: savedResult,
+        emissionResult: transformEmissionResult(savedResult),
       },
       { status: 201 }
     );
