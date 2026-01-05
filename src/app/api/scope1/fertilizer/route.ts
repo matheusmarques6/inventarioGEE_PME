@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import {
   calculateFertilizerEmissions,
   calculateLimestoneEmissions,
@@ -182,8 +183,8 @@ export async function POST(request: NextRequest) {
             activity: validatedData.activity,
             originalQuantity: validatedData.quantity,
             originalUnit: validatedData.unit,
-            calculatedDetails: emissionResult.details,
-          },
+            calculatedDetails: emissionResult.details as Prisma.InputJsonValue,
+          } as Prisma.InputJsonValue,
         },
       });
 
@@ -200,11 +201,11 @@ export async function POST(request: NextRequest) {
           isKyotoGas: true,
           gwpReference: "AR5",
           factorsSnapshot: {
-            ...emissionResult.details,
+            ...(emissionResult.details as Record<string, unknown>),
             co2Kg: emissionResult.co2Kg,
             n2oKg: emissionResult.n2oKg,
             totalTCO2e: emissionResult.totalTCO2e,
-          },
+          } as Prisma.InputJsonValue,
         },
       });
 
