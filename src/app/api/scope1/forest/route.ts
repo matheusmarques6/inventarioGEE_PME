@@ -249,19 +249,18 @@ async function updateInventoryTotals(inventoryId: string) {
     _sum: { co2Equivalent: true, biogenicCo2: true, removals: true },
   });
 
-  type ScopeTotals = { scope: number; _sum: { co2Equivalent: number | null; biogenicCo2: number | null; removals: number | null } };
   const scope1Total =
-    totals.find((t: ScopeTotals) => t.scope === 1)?._sum.co2Equivalent || 0;
+    totals.find((t) => t.scope === 1)?._sum.co2Equivalent || 0;
   const scope2Total =
-    totals.find((t: ScopeTotals) => t.scope === 2)?._sum.co2Equivalent || 0;
+    totals.find((t) => t.scope === 2)?._sum.co2Equivalent || 0;
   const scope3Total =
-    totals.find((t: ScopeTotals) => t.scope === 3)?._sum.co2Equivalent || 0;
+    totals.find((t) => t.scope === 3)?._sum.co2Equivalent || 0;
   const biogenicTotal = totals.reduce(
-    (sum: number, t: ScopeTotals) => sum + Number(t._sum.biogenicCo2 || 0),
+    (sum, t) => sum + Number(t._sum.biogenicCo2 || 0),
     0
   );
   const removalsTotal = totals.reduce(
-    (sum: number, t: ScopeTotals) => sum + Number(t._sum.removals || 0),
+    (sum, t) => sum + Number(t._sum.removals || 0),
     0
   );
 
