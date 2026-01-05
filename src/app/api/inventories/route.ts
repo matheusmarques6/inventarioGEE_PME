@@ -27,30 +27,24 @@ async function getOrCreateDefaultOrganization() {
   }
 
   // Create default organization using upsert to avoid race conditions
-  try {
-    organization = await prisma.organization.upsert({
-      where: { cnpj: "00000000000000" },
-      update: {},
-      create: {
-        name: "Minha Empresa",
-        cnpj: "00000000000000",
-        sector: "outros",
-      },
-    });
-    return organization;
-  } catch (error) {
-    // If upsert fails, try finding again (another request might have created it)
-    organization = await prisma.organization.findFirst();
-    if (organization) {
-      return organization;
-    }
-    throw error;
-  }
+  organization = await prisma.organization.upsert({
+    where: { cnpj: "00000000000000" },
+    update: {},
+    create: {
+      name: "Minha Empresa",
+      cnpj: "00000000000000",
+      sector: "outros",
+    },
+  });
+  return organization;
 }
 
 // GET /api/inventories - List all inventories
 export async function GET() {
   try {
+    // Test database connection first
+    await prisma.$queryRaw`SELECT 1`;
+
     // Ensure organization exists before querying inventories
     await getOrCreateDefaultOrganization();
 
@@ -65,9 +59,21 @@ export async function GET() {
 
     return NextResponse.json(inventories);
   } catch (error) {
-    console.error("Error fetching inventories:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorStack = error instanceof Error ? error.stack : "";
+
+    console.error("Error fetching inventories:", {
+      message: errorMessage,
+      stack: errorStack,
+      databaseUrl: process.env.DATABASE_URL ? "SET" : "NOT SET",
+    });
+
     return NextResponse.json(
-      { error: "Erro ao carregar inventários" },
+      {
+        error: "Erro ao carregar inventários",
+        details: errorMessage,
+        dbConfigured: !!process.env.DATABASE_URL,
+      },
       { status: 500 }
     );
   }
@@ -105,9 +111,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Error creating inventory:", error);
+
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("Error creating inventory:", errorMessage);
+
     return NextResponse.json(
-      { error: "Erro ao criar inventário" },
+      {
+        error: "Erro ao criar inventário",
+        details: errorMessage,
+      },
       { status: 500 }
     );
   }
