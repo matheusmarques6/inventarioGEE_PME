@@ -4,7 +4,8 @@ import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
-import { Prisma } from "@prisma/client";
+// Type for JSON value to avoid Prisma type import issues
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 
 const createActivityDataSchema = z.object({
   category: z.string(),
@@ -160,7 +161,7 @@ export async function POST(
         evidenceUrl: data.evidenceUrl,
         notes: data.notes,
         unitId: data.unitId,
-        metadata: (data.metadata as Prisma.InputJsonValue) ?? Prisma.DbNull,
+        metadata: (data.metadata as JsonValue) ?? null,
         createdBy: userId,
       },
     });
@@ -196,7 +197,7 @@ export async function POST(
         category: data.category as never,
         isKyotoGas: emissionResult.isKyotoGas,
         gwpReference: inventory.gwpReference,
-        factorsSnapshot: (emissionResult.factorsSnapshot as Prisma.InputJsonValue) ?? Prisma.DbNull,
+        factorsSnapshot: (emissionResult.factorsSnapshot as JsonValue) ?? null,
       },
     });
 

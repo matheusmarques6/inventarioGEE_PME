@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+// Type for JSON value to avoid Prisma type import issues
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 import {
   calculateFertilizerEmissions,
   calculateLimestoneEmissions,
@@ -183,8 +184,8 @@ export async function POST(request: NextRequest) {
             activity: validatedData.activity,
             originalQuantity: validatedData.quantity,
             originalUnit: validatedData.unit,
-            calculatedDetails: emissionResult.details as Prisma.InputJsonValue,
-          } as Prisma.InputJsonValue,
+            calculatedDetails: emissionResult.details as JsonValue,
+          } as JsonValue,
         },
       });
 
@@ -205,7 +206,7 @@ export async function POST(request: NextRequest) {
             co2Kg: emissionResult.co2Kg,
             n2oKg: emissionResult.n2oKg,
             totalTCO2e: emissionResult.totalTCO2e,
-          } as Prisma.InputJsonValue,
+          } as JsonValue,
         },
       });
 

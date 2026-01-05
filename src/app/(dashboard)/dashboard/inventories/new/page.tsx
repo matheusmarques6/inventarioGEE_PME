@@ -30,8 +30,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "@/components/ui/use-toast";
+import { useInventory } from "@/contexts/inventory-context";
 
 const formSchema = z.object({
   name: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
@@ -56,6 +58,7 @@ type FormData = z.infer<typeof formSchema>;
 export default function NewInventoryPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { setCurrentInventory } = useInventory();
 
   const currentYear = new Date().getFullYear();
 
@@ -83,14 +86,41 @@ export default function NewInventoryPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Erro ao criar inventário");
+        const error = await response.json();
+        throw new Error(error.error || "Erro ao criar inventário");
       }
 
       const inventory = await response.json();
-      router.push(`/dashboard/inventories/${inventory.id}`);
+
+      // Set as current inventory (use full inventory object from API)
+      setCurrentInventory({
+        id: inventory.id,
+        name: inventory.name || `Inventário ${inventory.baseYear}`,
+        baseYear: inventory.baseYear,
+        status: inventory.status || "DRAFT",
+        gwpReference: inventory.gwpReference || data.gwpReference,
+        includeScope1: inventory.includeScope1 ?? data.includeScope1,
+        includeScope2: inventory.includeScope2 ?? data.includeScope2,
+        includeScope3: inventory.includeScope3 ?? data.includeScope3,
+        totalEmissionsScope1: inventory.totalEmissionsScope1,
+        totalEmissionsScope2: inventory.totalEmissionsScope2,
+        totalEmissionsScope3: inventory.totalEmissionsScope3,
+      });
+
+      toast({
+        title: "Inventário criado com sucesso!",
+        description: `${data.name} está pronto para receber dados de emissões.`,
+      });
+
+      // Redirect to dashboard to start adding data
+      router.push("/dashboard");
     } catch (error) {
       console.error(error);
-      // TODO: Show error toast
+      toast({
+        title: "Erro ao criar inventário",
+        description: error instanceof Error ? error.message : "Tente novamente",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -257,8 +287,17 @@ export default function NewInventoryPage() {
               <Button variant="outline">Cancelar</Button>
             </Link>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Criando..." : "Criar Inventário"}
-              <ArrowRight className="ml-2 h-4 w-4" />
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Criando...
+                </>
+              ) : (
+                <>
+                  Criar Inventário
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </>
+              )}
             </Button>
           </div>
         </form>
