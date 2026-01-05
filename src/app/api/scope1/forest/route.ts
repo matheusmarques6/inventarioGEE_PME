@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
         month: data.month,
         year: data.year,
         dataSource: data.dataSource || "Manual",
-        dataQuality: "CALCULATED",
+        dataQuality: "SECONDARY_CALC",
         notes: data.notes,
         metadata: {
           forestType: data.forestType,
