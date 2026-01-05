@@ -17,9 +17,43 @@ const createInventorySchema = z.object({
   includeScope3: z.boolean().default(false),
 });
 
+// Helper to get or create default organization
+async function getOrCreateDefaultOrganization() {
+  // Try to find existing organization
+  let organization = await prisma.organization.findFirst();
+
+  if (organization) {
+    return organization;
+  }
+
+  // Create default organization using upsert to avoid race conditions
+  try {
+    organization = await prisma.organization.upsert({
+      where: { cnpj: "00000000000000" },
+      update: {},
+      create: {
+        name: "Minha Empresa",
+        cnpj: "00000000000000",
+        sector: "outros",
+      },
+    });
+    return organization;
+  } catch (error) {
+    // If upsert fails, try finding again (another request might have created it)
+    organization = await prisma.organization.findFirst();
+    if (organization) {
+      return organization;
+    }
+    throw error;
+  }
+}
+
 // GET /api/inventories - List all inventories
 export async function GET() {
   try {
+    // Ensure organization exists before querying inventories
+    await getOrCreateDefaultOrganization();
+
     const inventories = await prisma.inventory.findMany({
       orderBy: { baseYear: "desc" },
       include: {
@@ -45,20 +79,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = createInventorySchema.parse(body);
 
-    // Use a default organization or create one
-    let organization = await prisma.organization.findFirst();
-
-    if (!organization) {
-      organization = await prisma.organization.create({
-        data: {
-          id: "org-default",
-          name: "Minha Empresa",
-          cnpj: "00000000000000",
-          sector: "outros",
-          updatedAt: new Date(),
-        },
-      });
-    }
+    // Get or create default organization
+    const organization = await getOrCreateDefaultOrganization();
 
     const inventory = await prisma.inventory.create({
       data: {
