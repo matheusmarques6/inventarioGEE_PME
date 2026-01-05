@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/supabase/api";
 import Decimal from "decimal.js";
 import { createCalculationEngine } from "@/lib/calculation-engine";
-// Type for JSON value to avoid Prisma type import issues
-type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 
 // POST /api/inventories/[id]/calculate - Recalculate all emissions
 export async function POST(
@@ -93,7 +92,7 @@ export async function POST(
           isKyotoGas: result.isKyotoGas,
           uncertainty: result.uncertainty,
           gwpReference: inventory.gwpReference,
-          factorsSnapshot: (result.factorsSnapshot as JsonValue) ?? null,
+          factorsSnapshot: (result.factorsSnapshot ?? Prisma.DbNull) as Prisma.InputJsonValue,
         },
       });
 

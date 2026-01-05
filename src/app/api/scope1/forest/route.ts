@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-// Type for JSON value to avoid Prisma type import issues
-type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import {
@@ -184,7 +183,7 @@ export async function POST(request: NextRequest) {
           volume: data.volume,
           isRemoval,
           calculatedDetails,
-        } as JsonValue,
+        } as Prisma.InputJsonValue,
       },
     });
 
@@ -203,7 +202,7 @@ export async function POST(request: NextRequest) {
         calculatedAt: new Date(),
         calculationVersion: "1.0",
         gwpReference,
-        factorsSnapshot: calculatedDetails as JsonValue,
+        factorsSnapshot: calculatedDetails as Prisma.InputJsonValue,
       },
     });
 
