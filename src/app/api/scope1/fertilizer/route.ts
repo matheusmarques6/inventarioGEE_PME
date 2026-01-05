@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { Prisma } from "@prisma/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { z } from "zod";
 import {
   calculateFertilizerEmissions,
@@ -9,27 +8,18 @@ import {
   LimestoneEmissionResult,
 } from "@/lib/emission-factors/fertilizers";
 
-// Type alias for Prisma transaction client
-type PrismaTransactionClient = Omit<
-  typeof prisma,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
-
 // Schema for fertilizer input
 const fertilizerSchema = z.object({
   inventoryId: z.string(),
   unitId: z.string().optional(),
   sourceDescription: z.string().min(1, "Descrição é obrigatória"),
   fertilizerType: z.enum(["nitrogen", "limestone"]),
-  // For nitrogen fertilizers
   fertilizerName: z.string().optional(),
-  nitrogenContent: z.number().min(0).max(1).optional(), // 0-100% as 0-1
+  nitrogenContent: z.number().min(0).max(1).optional(),
   isUrea: z.boolean().optional(),
-  // For limestone
   limestoneType: z.enum(["calcitic", "dolomitic"]).optional(),
-  caoContent: z.number().min(0).max(1).optional(), // CaO %
-  mgoContent: z.number().min(0).max(1).optional(), // MgO %
-  // Common fields
+  caoContent: z.number().min(0).max(1).optional(),
+  mgoContent: z.number().min(0).max(1).optional(),
   quantity: z.number().positive("Quantidade deve ser positiva"),
   unit: z.enum(["kg", "ton"]).default("kg"),
   month: z.number().min(1).max(12).optional(),
@@ -38,9 +28,8 @@ const fertilizerSchema = z.object({
   dataQuality: z.enum(["PRIMARY", "PRIMARY_THIRD", "SECONDARY_CALC", "SECONDARY_ASSUMED", "EXTRAPOLATED"]).default("PRIMARY"),
   uncertainty: z.number().min(0).max(1).default(0.02),
   notes: z.string().optional(),
-  // Additional metadata
   sector: z.string().optional(),
-  activity: z.string().optional(), // Silvicultura, Agricultura, etc.
+  activity: z.string().optional(),
 });
 
 // GET - List all fertilizer data for an inventory
@@ -56,18 +45,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const activityData = await prisma.activityData.findMany({
-      where: {
-        inventoryId,
-        category: "AGRICULTURAL",
-        scope: 1,
-      },
-      include: {
-        unit: true,
-        emissionResults: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const supabase = getDb();
+    const { data: activityData, error } = await supabase
+      .from("activity_data")
+      .select("*, unit:operational_units(*), emission_results(*)")
+      .eq("inventory_id", inventoryId)
+      .eq("category", "AGRICULTURAL")
+      .eq("scope", 1)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(activityData);
   } catch (error) {
@@ -122,7 +109,6 @@ export async function POST(request: NextRequest) {
         },
       };
     } else {
-      // Limestone
       if (!validatedData.limestoneType || validatedData.caoContent === undefined) {
         return NextResponse.json(
           { error: "Tipo de calcário e teor de CaO são obrigatórios" },
@@ -147,75 +133,73 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-      const subcategory = validatedData.fertilizerType === "nitrogen"
-        ? validatedData.fertilizerName || "Fertilizante nitrogenado"
-        : `Calcário ${validatedData.limestoneType === "calcitic" ? "calcítico" : "dolomítico"}`;
+    const subcategory = validatedData.fertilizerType === "nitrogen"
+      ? validatedData.fertilizerName || "Fertilizante nitrogenado"
+      : `Calcário ${validatedData.limestoneType === "calcitic" ? "calcítico" : "dolomítico"}`;
 
-      // Create activity data
-      const activityData = await tx.activityData.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          unitId: validatedData.unitId,
-          category: "AGRICULTURAL",
-          subcategory,
-          scope: 1,
-          sourceDescription: validatedData.sourceDescription,
-          activityType: "Aplicação de fertilizantes/calcário",
-          quantity: quantityKg,
-          quantityUnit: "kg",
-          month: validatedData.month,
-          year: validatedData.year,
-          dataSource: validatedData.dataSource,
-          dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
-          notes: validatedData.notes,
-          metadata: {
-            fertilizerType: validatedData.fertilizerType,
-            fertilizerName: validatedData.fertilizerName,
-            nitrogenContent: validatedData.nitrogenContent,
-            isUrea: validatedData.isUrea,
-            limestoneType: validatedData.limestoneType,
-            caoContent: validatedData.caoContent,
-            mgoContent: validatedData.mgoContent,
-            sector: validatedData.sector,
-            activity: validatedData.activity,
-            originalQuantity: validatedData.quantity,
-            originalUnit: validatedData.unit,
-            calculatedDetails: emissionResult.details,
-          } as Prisma.InputJsonValue,
-        },
-      });
-
-      // Create emission result
-      const emission = await tx.emissionResult.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          activityDataId: activityData.id,
-          co2Mass: emissionResult.co2Kg,
-          n2oMass: emissionResult.n2oKg ? emissionResult.n2oKg : null,
-          co2Equivalent: emissionResult.totalTCO2e,
-          scope: 1,
-          category: "AGRICULTURAL",
-          isKyotoGas: true,
-          gwpReference: "AR5",
-          factorsSnapshot: {
-            ...(emissionResult.details as Record<string, unknown>),
-            co2Kg: emissionResult.co2Kg,
-            n2oKg: emissionResult.n2oKg,
-            totalTCO2e: emissionResult.totalTCO2e,
-          } as Prisma.InputJsonValue,
-        },
-      });
-
-      // Update inventory totals
-      await updateInventoryTotals(tx, validatedData.inventoryId);
-
-      return { activityData, emission, calculatedEmissions: emissionResult };
+    // Create activity data
+    const activityData = await db.activityData.create({
+      inventory_id: validatedData.inventoryId,
+      unit_id: validatedData.unitId,
+      category: "AGRICULTURAL",
+      subcategory,
+      scope: 1,
+      source_description: validatedData.sourceDescription,
+      activity_type: "Aplicação de fertilizantes/calcário",
+      quantity: quantityKg,
+      quantity_unit: "kg",
+      month: validatedData.month,
+      year: validatedData.year,
+      data_source: validatedData.dataSource,
+      data_quality: validatedData.dataQuality,
+      uncertainty: validatedData.uncertainty || null,
+      notes: validatedData.notes,
+      metadata: {
+        fertilizerType: validatedData.fertilizerType,
+        fertilizerName: validatedData.fertilizerName,
+        nitrogenContent: validatedData.nitrogenContent,
+        isUrea: validatedData.isUrea,
+        limestoneType: validatedData.limestoneType,
+        caoContent: validatedData.caoContent,
+        mgoContent: validatedData.mgoContent,
+        sector: validatedData.sector,
+        activity: validatedData.activity,
+        originalQuantity: validatedData.quantity,
+        originalUnit: validatedData.unit,
+        calculatedDetails: emissionResult.details,
+      },
     });
 
-    return NextResponse.json(result, { status: 201 });
+    // Create emission result
+    const emission = await db.emissionResults.create({
+      inventory_id: validatedData.inventoryId,
+      activity_data_id: activityData.id,
+      co2_mass: emissionResult.co2Kg,
+      n2o_mass: emissionResult.n2oKg || null,
+      co2_equivalent: emissionResult.totalTCO2e,
+      scope: 1,
+      category: "AGRICULTURAL",
+      is_kyoto_gas: true,
+      gwp_reference: "AR5",
+      factors_snapshot: {
+        ...emissionResult.details,
+        co2Kg: emissionResult.co2Kg,
+        n2oKg: emissionResult.n2oKg,
+        totalTCO2e: emissionResult.totalTCO2e,
+      },
+    });
+
+    // Update inventory totals
+    const totals = await db.emissionResults.sumByInventory(validatedData.inventoryId);
+    await db.inventories.update(validatedData.inventoryId, {
+      total_emissions_scope1: totals.scope1.co2_equivalent,
+      total_biogenic_emissions: totals.scope1.biogenic_co2,
+    });
+
+    return NextResponse.json(
+      { activityData, emission, calculatedEmissions: emissionResult },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Error creating fertilizer data:", error);
 
@@ -231,20 +215,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-// Helper function to update inventory totals
-async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
-  const scope1Total = await tx.emissionResult.aggregate({
-    where: { inventoryId, scope: 1 },
-    _sum: { co2Equivalent: true, biogenicCo2: true },
-  });
-
-  await tx.inventory.update({
-    where: { id: inventoryId },
-    data: {
-      totalEmissionsScope1: scope1Total._sum.co2Equivalent || 0,
-      totalBiogenicEmissions: scope1Total._sum.biogenicCo2 || 0,
-    },
-  });
 }

@@ -1,13 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { Prisma } from "@prisma/client";
+import { db, EmissionCategory } from "@/lib/db/supabase-db";
 import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
 
+const emissionCategories: [EmissionCategory, ...EmissionCategory[]] = [
+  "STATIONARY_COMBUSTION",
+  "MOBILE_COMBUSTION",
+  "FUGITIVE_EMISSIONS",
+  "PROCESS_EMISSIONS",
+  "AGRICULTURAL",
+  "LULUCF",
+  "WASTE_INTERNAL",
+  "PURCHASED_ELECTRICITY",
+  "PURCHASED_HEAT",
+  "PURCHASED_GOODS",
+  "CAPITAL_GOODS",
+  "FUEL_ENERGY_ACTIVITIES",
+  "UPSTREAM_TRANSPORT",
+  "DOWNSTREAM_TRANSPORT",
+  "WASTE_EXTERNAL",
+  "BUSINESS_TRAVEL",
+  "EMPLOYEE_COMMUTING",
+  "LEASED_ASSETS",
+  "INVESTMENTS",
+];
+
 const createActivityDataSchema = z.object({
-  category: z.string(),
+  category: z.enum(emissionCategories),
   subcategory: z.string().optional(),
   scope: z.number().min(1).max(3),
   sourceDescription: z.string(),
@@ -55,12 +76,7 @@ export async function GET(
     const limit = parseInt(searchParams.get("limit") || "50");
 
     // Verify access to inventory
-    const inventory = await prisma.inventory.findFirst({
-      where: {
-        id: inventoryId,
-        organizationId: dbUser.organizationId,
-      },
-    });
+    const inventory = await db.inventories.findByIdWithOrg(inventoryId, dbUser.organization_id);
 
     if (!inventory) {
       return NextResponse.json(
@@ -70,22 +86,19 @@ export async function GET(
     }
 
     // Build filters
-    const where: Record<string, unknown> = { inventoryId };
-    if (scope) where.scope = parseInt(scope);
-    if (category) where.category = category;
-
     const [activityData, total] = await Promise.all([
-      prisma.activityData.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          unit: true,
-          emissionResults: true,
-        },
+      db.activityData.findMany({
+        inventoryId,
+        scope: scope ? parseInt(scope) : undefined,
+        category: category || undefined,
+        page,
+        limit,
       }),
-      prisma.activityData.count({ where }),
+      db.activityData.count({
+        inventoryId,
+        scope: scope ? parseInt(scope) : undefined,
+        category: category || undefined,
+      }),
     ]);
 
     return NextResponse.json({
@@ -125,12 +138,7 @@ export async function POST(
     const data = createActivityDataSchema.parse(body);
 
     // Verify access to inventory
-    const inventory = await prisma.inventory.findFirst({
-      where: {
-        id: inventoryId,
-        organizationId: dbUser.organizationId,
-      },
-    });
+    const inventory = await db.inventories.findByIdWithOrg(inventoryId, dbUser.organization_id);
 
     if (!inventory) {
       return NextResponse.json(
@@ -140,29 +148,25 @@ export async function POST(
     }
 
     // Create activity data
-    const activityData = await prisma.activityData.create({
-      data: {
-        inventoryId,
-        category: data.category as never,
-        subcategory: data.subcategory,
-        scope: data.scope,
-        sourceDescription: data.sourceDescription,
-        activityType: data.activityType,
-        quantity: new Decimal(data.quantity),
-        quantityUnit: data.quantityUnit,
-        month: data.month,
-        year: data.year,
-        dataSource: data.dataSource,
-        dataQuality: data.dataQuality as never,
-        uncertainty: data.uncertainty
-          ? new Decimal(data.uncertainty)
-          : undefined,
-        evidenceUrl: data.evidenceUrl,
-        notes: data.notes,
-        unitId: data.unitId,
-        metadata: (data.metadata ?? Prisma.DbNull) as Prisma.InputJsonValue,
-        createdBy: userId,
-      },
+    const activityData = await db.activityData.create({
+      inventory_id: inventoryId,
+      category: data.category,
+      subcategory: data.subcategory,
+      scope: data.scope,
+      source_description: data.sourceDescription,
+      activity_type: data.activityType,
+      quantity: data.quantity,
+      quantity_unit: data.quantityUnit,
+      month: data.month,
+      year: data.year,
+      data_source: data.dataSource,
+      data_quality: data.dataQuality || "PRIMARY",
+      uncertainty: data.uncertainty,
+      evidence_url: data.evidenceUrl,
+      notes: data.notes,
+      unit_id: data.unitId,
+      metadata: data.metadata || null,
+      created_by: userId,
     });
 
     // Calculate emissions
@@ -178,41 +182,37 @@ export async function POST(
     const emissionResult = quickCalculate(
       data.category,
       calculationInput as Record<string, unknown>,
-      inventory.gwpReference
+      inventory.gwp_reference
     );
 
     // Save emission result
-    const savedResult = await prisma.emissionResult.create({
-      data: {
-        inventoryId,
-        activityDataId: activityData.id,
-        co2Mass: emissionResult.co2Mass,
-        ch4Mass: emissionResult.ch4Mass,
-        n2oMass: emissionResult.n2oMass,
-        co2Equivalent: emissionResult.co2Equivalent,
-        biogenicCo2: emissionResult.biogenicCo2,
-        removals: emissionResult.removals,
-        scope: data.scope,
-        category: data.category as never,
-        isKyotoGas: emissionResult.isKyotoGas,
-        gwpReference: inventory.gwpReference,
-        factorsSnapshot: (emissionResult.factorsSnapshot ?? Prisma.DbNull) as Prisma.InputJsonValue,
-      },
+    const savedResult = await db.emissionResults.create({
+      inventory_id: inventoryId,
+      activity_data_id: activityData.id,
+      co2_mass: emissionResult.co2Mass ? Number(emissionResult.co2Mass) : null,
+      ch4_mass: emissionResult.ch4Mass ? Number(emissionResult.ch4Mass) : null,
+      n2o_mass: emissionResult.n2oMass ? Number(emissionResult.n2oMass) : null,
+      co2_equivalent: Number(emissionResult.co2Equivalent),
+      biogenic_co2: emissionResult.biogenicCo2 ? Number(emissionResult.biogenicCo2) : null,
+      removals: emissionResult.removals ? Number(emissionResult.removals) : null,
+      scope: data.scope,
+      category: data.category,
+      is_kyoto_gas: emissionResult.isKyotoGas,
+      gwp_reference: inventory.gwp_reference,
+      factors_snapshot: emissionResult.factorsSnapshot || null,
     });
 
     // Log the action
-    await prisma.auditLog.create({
-      data: {
-        inventoryId,
-        action: "CREATE",
-        entityType: "ActivityData",
-        entityId: activityData.id,
-        userId: userId!,
-        userEmail: dbUser.email,
-        newValue: {
-          activityData: JSON.parse(JSON.stringify(activityData)),
-          emissionResult: JSON.parse(JSON.stringify(savedResult)),
-        },
+    await db.auditLogs.create({
+      inventory_id: inventoryId,
+      action: "CREATE",
+      entity_type: "ActivityData",
+      entity_id: activityData.id,
+      user_id: userId!,
+      user_email: dbUser.email,
+      new_value: {
+        activityData,
+        emissionResult: savedResult,
       },
     });
 

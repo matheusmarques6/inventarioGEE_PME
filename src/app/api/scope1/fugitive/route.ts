@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { z } from "zod";
 import { calculateFugitiveEmissions, FugitiveResult } from "@/lib/calculations/scope1";
 import { GWP_REFRIGERANTS, isKyotoGas } from "@/lib/emission-factors/gwp";
-
-// Type alias for Prisma transaction client
-type PrismaTransactionClient = Omit<
-  typeof prisma,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
 
 // Schema for fugitive emissions input
 const fugitiveEmissionsSchema = z.object({
@@ -16,7 +10,7 @@ const fugitiveEmissionsSchema = z.object({
   unitId: z.string().optional(),
   sourceDescription: z.string().min(1, "Descrição da fonte é obrigatória"),
   gasName: z.string().min(1, "Nome do gás refrigerante é obrigatório"),
-  commercialName: z.string().optional(), // Nome comercial do produto
+  commercialName: z.string().optional(),
   quantity: z.number().positive("Quantidade deve ser positiva"),
   unit: z.enum(["kg"]).default("kg"),
   month: z.number().min(1).max(12).optional(),
@@ -25,9 +19,8 @@ const fugitiveEmissionsSchema = z.object({
   dataQuality: z.enum(["PRIMARY", "PRIMARY_THIRD", "SECONDARY_CALC", "SECONDARY_ASSUMED", "EXTRAPOLATED"]).default("PRIMARY"),
   uncertainty: z.number().min(0).max(1).default(0.02),
   notes: z.string().optional(),
-  // Additional metadata
   sector: z.string().optional(),
-  equipment: z.string().optional(), // Ar condicionado, Refrigerador, etc.
+  equipment: z.string().optional(),
 });
 
 // GET - List all fugitive emissions data for an inventory
@@ -43,18 +36,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const activityData = await prisma.activityData.findMany({
-      where: {
-        inventoryId,
-        category: "FUGITIVE_EMISSIONS",
-        scope: 1,
-      },
-      include: {
-        unit: true,
-        emissionResults: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const supabase = getDb();
+    const { data: activityData, error } = await supabase
+      .from("activity_data")
+      .select("*, unit:operational_units(*), emission_results(*)")
+      .eq("inventory_id", inventoryId)
+      .eq("category", "FUGITIVE_EMISSIONS")
+      .eq("scope", 1)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(activityData);
   } catch (error) {
@@ -86,70 +77,67 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Determine HFC mass for the specific gas type
     const gasInfo = GWP_REFRIGERANTS[validatedData.gasName];
     const isKyoto = isKyotoGas(validatedData.gasName);
 
-    // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-      // Create activity data
-      const activityData = await tx.activityData.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          unitId: validatedData.unitId,
-          category: "FUGITIVE_EMISSIONS",
-          subcategory: validatedData.gasName,
-          scope: 1,
-          sourceDescription: validatedData.sourceDescription,
-          activityType: "Emissões fugitivas",
-          quantity: validatedData.quantity,
-          quantityUnit: validatedData.unit,
-          month: validatedData.month,
-          year: validatedData.year,
-          dataSource: validatedData.dataSource,
-          dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
-          notes: validatedData.notes,
-          metadata: {
-            gasName: validatedData.gasName,
-            commercialName: validatedData.commercialName,
-            equipment: validatedData.equipment,
-            sector: validatedData.sector,
-            gwp: emissionResult.gwp,
-            gasFamily: gasInfo?.family || "Unknown",
-            isKyotoGas: isKyoto,
-          },
-        },
-      });
-
-      // Create emission result
-      const emission = await tx.emissionResult.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          activityDataId: activityData.id,
-          hfcMass: validatedData.quantity,
-          co2Equivalent: emissionResult.totalTCO2e,
-          scope: 1,
-          category: "FUGITIVE_EMISSIONS",
-          isKyotoGas: isKyoto,
-          gwpReference: "AR5",
-          factorsSnapshot: {
-            gasName: validatedData.gasName,
-            gwp: emissionResult.gwp,
-            quantityKg: validatedData.quantity,
-            kyotoTCO2e: emissionResult.kyotoTCO2e,
-            nonKyotoTCO2e: emissionResult.nonKyotoTCO2e,
-          },
-        },
-      });
-
-      // Update inventory totals
-      await updateInventoryTotals(tx, validatedData.inventoryId);
-
-      return { activityData, emission, calculatedEmissions: emissionResult };
+    // Create activity data
+    const activityData = await db.activityData.create({
+      inventory_id: validatedData.inventoryId,
+      unit_id: validatedData.unitId,
+      category: "FUGITIVE_EMISSIONS",
+      subcategory: validatedData.gasName,
+      scope: 1,
+      source_description: validatedData.sourceDescription,
+      activity_type: "Emissões fugitivas",
+      quantity: validatedData.quantity,
+      quantity_unit: validatedData.unit,
+      month: validatedData.month,
+      year: validatedData.year,
+      data_source: validatedData.dataSource,
+      data_quality: validatedData.dataQuality,
+      uncertainty: validatedData.uncertainty || null,
+      notes: validatedData.notes,
+      metadata: {
+        gasName: validatedData.gasName,
+        commercialName: validatedData.commercialName,
+        equipment: validatedData.equipment,
+        sector: validatedData.sector,
+        gwp: emissionResult.gwp,
+        gasFamily: gasInfo?.family || "Unknown",
+        isKyotoGas: isKyoto,
+      },
     });
 
-    return NextResponse.json(result, { status: 201 });
+    // Create emission result
+    const emission = await db.emissionResults.create({
+      inventory_id: validatedData.inventoryId,
+      activity_data_id: activityData.id,
+      hfc_mass: validatedData.quantity,
+      co2_equivalent: emissionResult.totalTCO2e,
+      scope: 1,
+      category: "FUGITIVE_EMISSIONS",
+      is_kyoto_gas: isKyoto,
+      gwp_reference: "AR5",
+      factors_snapshot: {
+        gasName: validatedData.gasName,
+        gwp: emissionResult.gwp,
+        quantityKg: validatedData.quantity,
+        kyotoTCO2e: emissionResult.kyotoTCO2e,
+        nonKyotoTCO2e: emissionResult.nonKyotoTCO2e,
+      },
+    });
+
+    // Update inventory totals
+    const totals = await db.emissionResults.sumByInventory(validatedData.inventoryId);
+    await db.inventories.update(validatedData.inventoryId, {
+      total_emissions_scope1: totals.scope1.co2_equivalent,
+      total_biogenic_emissions: totals.scope1.biogenic_co2,
+    });
+
+    return NextResponse.json(
+      { activityData, emission, calculatedEmissions: emissionResult },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Error creating fugitive emissions data:", error);
 
@@ -178,20 +166,4 @@ export async function OPTIONS() {
   }));
 
   return NextResponse.json({ gases });
-}
-
-// Helper function to update inventory totals
-async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
-  const scope1Total = await tx.emissionResult.aggregate({
-    where: { inventoryId, scope: 1 },
-    _sum: { co2Equivalent: true, biogenicCo2: true },
-  });
-
-  await tx.inventory.update({
-    where: { id: inventoryId },
-    data: {
-      totalEmissionsScope1: scope1Total._sum.co2Equivalent || 0,
-      totalBiogenicEmissions: scope1Total._sum.biogenicCo2 || 0,
-    },
-  });
 }

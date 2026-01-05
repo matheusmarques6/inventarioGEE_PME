@@ -1,26 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { z } from "zod";
 
-// Type for emission result from Prisma
+// Type for emission result
 interface EmissionResultData {
   scope: number;
   category: string;
-  co2Equivalent: unknown;
-  biogenicCo2: unknown;
+  co2_equivalent: number | null;
+  biogenic_co2: number | null;
 }
 
-// Type for activity data from Prisma
+// Type for activity data
 interface ActivityDataRecord {
   id: string;
   category: string;
-  sourceDescription: string;
-  activityType: string;
-  quantity: unknown;
-  quantityUnit: string;
+  source_description: string;
+  activity_type: string;
+  quantity: number;
+  quantity_unit: string;
   month: number | null;
   year: number;
-  emissionResults: { co2Equivalent: unknown; scope: number }[];
 }
 
 const generateReportSchema = z.object({
@@ -42,18 +41,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const reports = await prisma.report.findMany({
-      where: { inventoryId },
-      include: {
-        inventory: {
-          select: {
-            name: true,
-            baseYear: true,
-          },
-        },
-      },
-      orderBy: { generatedAt: "desc" },
-    });
+    const reports = await db.reports.findByInventory(inventoryId);
 
     return NextResponse.json(reports);
   } catch (error) {
@@ -72,19 +60,7 @@ export async function POST(request: NextRequest) {
     const validatedData = generateReportSchema.parse(body);
 
     // Fetch inventory data for the report
-    const inventory = await prisma.inventory.findUnique({
-      where: { id: validatedData.inventoryId },
-      include: {
-        organization: true,
-        activityData: {
-          include: {
-            unit: true,
-            emissionResults: true,
-          },
-        },
-        emissionResults: true,
-      },
-    });
+    const inventory = await db.inventories.findById(validatedData.inventoryId);
 
     if (!inventory) {
       return NextResponse.json(
@@ -93,36 +69,55 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get organization
+    const { data: organization } = await getDb()
+      .from("organizations")
+      .select("*")
+      .eq("id", inventory.organization_id)
+      .single();
+
+    // Get emission results
+    const { data: emissionResults } = await getDb()
+      .from("emission_results")
+      .select("scope, category, co2_equivalent, biogenic_co2")
+      .eq("inventory_id", validatedData.inventoryId);
+
+    // Get activity data
+    const { data: activityData } = await getDb()
+      .from("activity_data")
+      .select("id, category, source_description, activity_type, quantity, quantity_unit, month, year")
+      .eq("inventory_id", validatedData.inventoryId);
+
     // Cast to typed arrays
-    const emissionResults = inventory.emissionResults as EmissionResultData[];
-    const activityData = inventory.activityData as unknown as ActivityDataRecord[];
+    const typedResults = (emissionResults as EmissionResultData[] | null) || [];
+    const typedActivityData = (activityData as ActivityDataRecord[] | null) || [];
 
     // Calculate emissions by scope and category
-    const scope1Results = emissionResults.filter((r) => r.scope === 1);
-    const scope2Results = emissionResults.filter((r) => r.scope === 2);
-    const scope3Results = emissionResults.filter((r) => r.scope === 3);
+    const scope1Results = typedResults.filter((r) => r.scope === 1);
+    const scope2Results = typedResults.filter((r) => r.scope === 2);
+    const scope3Results = typedResults.filter((r) => r.scope === 3);
 
     const totalScope1 = scope1Results.reduce(
-      (sum, r) => sum + Number(r.co2Equivalent || 0), 0
+      (sum, r) => sum + Number(r.co2_equivalent || 0), 0
     );
     const totalScope2 = scope2Results.reduce(
-      (sum, r) => sum + Number(r.co2Equivalent || 0), 0
+      (sum, r) => sum + Number(r.co2_equivalent || 0), 0
     );
     const totalScope3 = scope3Results.reduce(
-      (sum, r) => sum + Number(r.co2Equivalent || 0), 0
+      (sum, r) => sum + Number(r.co2_equivalent || 0), 0
     );
-    const totalBiogenic = emissionResults.reduce(
-      (sum, r) => sum + Number(r.biogenicCo2 || 0), 0
+    const totalBiogenic = typedResults.reduce(
+      (sum, r) => sum + Number(r.biogenic_co2 || 0), 0
     );
 
     // Group emissions by category
     const emissionsByCategory: Record<string, number> = {};
-    for (const result of emissionResults) {
+    for (const result of typedResults) {
       const category = result.category;
       if (!emissionsByCategory[category]) {
         emissionsByCategory[category] = 0;
       }
-      emissionsByCategory[category] += Number(result.co2Equivalent || 0);
+      emissionsByCategory[category] += Number(result.co2_equivalent || 0);
     }
 
     // Generate report data based on type
@@ -138,16 +133,20 @@ export async function POST(request: NextRequest) {
       CUSTOM: "Relatório Personalizado",
     };
 
+    const orgName = organization?.name || "Organização";
+    const orgCnpj = organization?.cnpj || "";
+    const orgSector = organization?.sector || "";
+
     switch (validatedData.type) {
       case "GHG_PROTOCOL":
         reportData = {
-          title: `Inventário de Emissões de GEE - ${inventory.baseYear}`,
-          organization: inventory.organization.name,
-          cnpj: inventory.organization.cnpj,
-          sector: inventory.organization.sector,
-          reportingPeriod: inventory.reportingPeriod,
-          gwpReference: inventory.gwpReference,
-          consolidationApproach: inventory.consolidationApproach,
+          title: `Inventário de Emissões de GEE - ${inventory.base_year}`,
+          organization: orgName,
+          cnpj: orgCnpj,
+          sector: orgSector,
+          reportingPeriod: inventory.reporting_period,
+          gwpReference: inventory.gwp_reference,
+          consolidationApproach: inventory.consolidation_approach,
           emissions: {
             scope1: {
               total: totalScope1,
@@ -171,16 +170,16 @@ export async function POST(request: NextRequest) {
             biogenic: totalBiogenic,
             total: totalScope1 + totalScope2 + totalScope3,
           },
-          activityDataCount: activityData.length,
+          activityDataCount: typedActivityData.length,
           generatedAt: new Date().toISOString(),
         };
-        fileName = `GHG_Protocol_${inventory.baseYear}_${inventory.organization.name.replace(/\s+/g, "_")}`;
+        fileName = `GHG_Protocol_${inventory.base_year}_${orgName.replace(/\s+/g, "_")}`;
         break;
 
       case "EXECUTIVE_SUMMARY":
         reportData = {
-          title: `Sumário Executivo - Inventário GEE ${inventory.baseYear}`,
-          organization: inventory.organization.name,
+          title: `Sumário Executivo - Inventário GEE ${inventory.base_year}`,
+          organization: orgName,
           highlights: {
             totalEmissions: totalScope1 + totalScope2 + totalScope3,
             scope1: totalScope1,
@@ -194,16 +193,16 @@ export async function POST(request: NextRequest) {
             .map(([category, value]) => ({ category, value })),
           generatedAt: new Date().toISOString(),
         };
-        fileName = `Sumario_Executivo_${inventory.baseYear}`;
+        fileName = `Sumario_Executivo_${inventory.base_year}`;
         break;
 
       case "SBCE":
         reportData = {
-          title: `Relatório SBCE - ${inventory.baseYear}`,
+          title: `Relatório SBCE - ${inventory.base_year}`,
           empresa: {
-            razaoSocial: inventory.organization.name,
-            cnpj: inventory.organization.cnpj,
-            setor: inventory.organization.sector,
+            razaoSocial: orgName,
+            cnpj: orgCnpj,
+            setor: orgSector,
           },
           emissoes: {
             escopo1: totalScope1,
@@ -213,20 +212,20 @@ export async function POST(request: NextRequest) {
             total: totalScope1 + totalScope2 + totalScope3,
           },
           metodologia: {
-            gwp: inventory.gwpReference,
-            abordagem: inventory.consolidationApproach,
+            gwp: inventory.gwp_reference,
+            abordagem: inventory.consolidation_approach,
           },
           generatedAt: new Date().toISOString(),
         };
-        fileName = `SBCE_${inventory.baseYear}_${inventory.organization.cnpj}`;
+        fileName = `SBCE_${inventory.base_year}_${orgCnpj}`;
         break;
 
       default:
         reportData = {
           inventory: {
             id: inventory.id,
-            baseYear: inventory.baseYear,
-            organization: inventory.organization.name,
+            baseYear: inventory.base_year,
+            organization: orgName,
           },
           emissions: {
             scope1: totalScope1,
@@ -235,20 +234,16 @@ export async function POST(request: NextRequest) {
             biogenic: totalBiogenic,
             total: totalScope1 + totalScope2 + totalScope3,
           },
-          activityData: activityData.map(ad => ({
+          activityData: typedActivityData.map(ad => ({
             id: ad.id,
             category: ad.category,
-            sourceDescription: ad.sourceDescription,
+            sourceDescription: ad.source_description,
             quantity: Number(ad.quantity),
-            unit: ad.quantityUnit,
-            emissions: ad.emissionResults.map(er => ({
-              co2Equivalent: Number(er.co2Equivalent),
-              scope: er.scope,
-            })),
+            unit: ad.quantity_unit,
           })),
           generatedAt: new Date().toISOString(),
         };
-        fileName = `Relatorio_${inventory.baseYear}`;
+        fileName = `Relatorio_${inventory.base_year}`;
     }
 
     // Store the report data as JSON for now
@@ -257,15 +252,13 @@ export async function POST(request: NextRequest) {
     const fullFileName = `${fileName}.${fileExtension}`;
 
     // Create the report record
-    const report = await prisma.report.create({
-      data: {
-        inventoryId: validatedData.inventoryId,
-        type: validatedData.type,
-        format: validatedData.format,
-        fileName: fullFileName,
-        // In production, this would be the URL to the generated file
-        fileUrl: `/api/reports/download?data=${encodeURIComponent(JSON.stringify(reportData))}`,
-      },
+    const report = await db.reports.create({
+      inventory_id: validatedData.inventoryId,
+      type: validatedData.type,
+      format: validatedData.format,
+      file_name: fullFileName,
+      // In production, this would be the URL to the generated file
+      file_url: `/api/reports/download?data=${encodeURIComponent(JSON.stringify(reportData))}`,
     });
 
     return NextResponse.json({
@@ -303,9 +296,10 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await prisma.report.delete({
-      where: { id: reportId },
-    });
+    await getDb()
+      .from("reports")
+      .delete()
+      .eq("id", reportId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

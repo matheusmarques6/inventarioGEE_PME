@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { Prisma } from "@prisma/client";
+import { db, EmissionCategory } from "@/lib/db/supabase-db";
 import { requireAuth } from "@/lib/supabase/api";
 import Decimal from "decimal.js";
 import { createCalculationEngine } from "@/lib/calculation-engine";
@@ -21,16 +20,8 @@ export async function POST(
 
     const { id: inventoryId } = await params;
 
-    // Get inventory with all activity data
-    const inventory = await prisma.inventory.findFirst({
-      where: {
-        id: inventoryId,
-        organizationId: dbUser.organizationId,
-      },
-      include: {
-        activityData: true,
-      },
-    });
+    // Get inventory
+    const inventory = await db.inventories.findByIdWithOrg(inventoryId, dbUser.organization_id);
 
     if (!inventory) {
       return NextResponse.json(
@@ -39,18 +30,19 @@ export async function POST(
       );
     }
 
+    // Get all activity data for this inventory
+    const activityDataList = await db.activityData.findAll(inventoryId);
+
     // Create calculation engine
     const engine = createCalculationEngine({
-      gwpReference: inventory.gwpReference,
-      year: inventory.baseYear,
-      organizationId: dbUser.organizationId,
+      gwpReference: inventory.gwp_reference,
+      year: inventory.base_year,
+      organizationId: dbUser.organization_id,
       inventoryId: inventory.id,
     });
 
     // Delete existing results
-    await prisma.emissionResult.deleteMany({
-      where: { inventoryId },
-    });
+    await db.emissionResults.deleteByInventoryId(inventoryId);
 
     // Calculate emissions for each activity data
     const results = [];
@@ -60,11 +52,11 @@ export async function POST(
     let totalBiogenic = new Decimal(0);
     let totalRemovals = new Decimal(0);
 
-    for (const activity of inventory.activityData) {
+    for (const activity of activityDataList) {
       const input = {
-        fuelType: activity.activityType,
+        fuelType: activity.activity_type,
         quantity: new Decimal(activity.quantity.toString()),
-        unit: activity.quantityUnit,
+        unit: activity.quantity_unit,
         year: activity.year,
         month: activity.month ?? undefined,
         ...(activity.metadata as Record<string, unknown>),
@@ -73,27 +65,25 @@ export async function POST(
       const result = engine.calculateActivity(activity.category, input);
 
       // Save result
-      const savedResult = await prisma.emissionResult.create({
-        data: {
-          inventoryId,
-          activityDataId: activity.id,
-          co2Mass: result.co2Mass,
-          ch4Mass: result.ch4Mass,
-          n2oMass: result.n2oMass,
-          hfcMass: result.hfcMass,
-          pfcMass: result.pfcMass,
-          sf6Mass: result.sf6Mass,
-          nf3Mass: result.nf3Mass,
-          co2Equivalent: result.co2Equivalent,
-          biogenicCo2: result.biogenicCo2,
-          removals: result.removals,
-          scope: result.scope,
-          category: result.category as never,
-          isKyotoGas: result.isKyotoGas,
-          uncertainty: result.uncertainty,
-          gwpReference: inventory.gwpReference,
-          factorsSnapshot: (result.factorsSnapshot ?? Prisma.DbNull) as Prisma.InputJsonValue,
-        },
+      const savedResult = await db.emissionResults.create({
+        inventory_id: inventoryId,
+        activity_data_id: activity.id,
+        co2_mass: result.co2Mass ? Number(result.co2Mass) : null,
+        ch4_mass: result.ch4Mass ? Number(result.ch4Mass) : null,
+        n2o_mass: result.n2oMass ? Number(result.n2oMass) : null,
+        hfc_mass: result.hfcMass ? Number(result.hfcMass) : null,
+        pfc_mass: result.pfcMass ? Number(result.pfcMass) : null,
+        sf6_mass: result.sf6Mass ? Number(result.sf6Mass) : null,
+        nf3_mass: result.nf3Mass ? Number(result.nf3Mass) : null,
+        co2_equivalent: Number(result.co2Equivalent),
+        biogenic_co2: result.biogenicCo2 ? Number(result.biogenicCo2) : null,
+        removals: result.removals ? Number(result.removals) : null,
+        scope: result.scope,
+        category: result.category as EmissionCategory,
+        is_kyoto_gas: result.isKyotoGas,
+        uncertainty: result.uncertainty ? Number(result.uncertainty) : null,
+        gwp_reference: inventory.gwp_reference,
+        factors_snapshot: result.factorsSnapshot || null,
       });
 
       results.push(savedResult);
@@ -110,40 +100,38 @@ export async function POST(
           totalScope3 = totalScope3.plus(result.co2Equivalent);
           break;
       }
-      totalBiogenic = totalBiogenic.plus(result.biogenicCo2);
-      totalRemovals = totalRemovals.plus(result.removals);
+      if (result.biogenicCo2) {
+        totalBiogenic = totalBiogenic.plus(result.biogenicCo2);
+      }
+      if (result.removals) {
+        totalRemovals = totalRemovals.plus(result.removals);
+      }
     }
 
     // Update inventory totals
-    await prisma.inventory.update({
-      where: { id: inventoryId },
-      data: {
-        totalEmissionsScope1: totalScope1,
-        totalEmissionsScope2: totalScope2,
-        totalEmissionsScope3: totalScope3,
-        totalBiogenicEmissions: totalBiogenic,
-        totalRemovals: totalRemovals,
-        updatedAt: new Date(),
-      },
+    await db.inventories.update(inventoryId, {
+      total_emissions_scope1: totalScope1.toNumber(),
+      total_emissions_scope2: totalScope2.toNumber(),
+      total_emissions_scope3: totalScope3.toNumber(),
+      total_biogenic_emissions: totalBiogenic.toNumber(),
+      total_removals: totalRemovals.toNumber(),
     });
 
     // Log the action
-    await prisma.auditLog.create({
-      data: {
-        inventoryId,
-        action: "CALCULATE",
-        entityType: "Inventory",
-        entityId: inventoryId,
-        userId: userId!,
-        userEmail: dbUser.email,
-        newValue: {
-          totalScope1: totalScope1.toNumber(),
-          totalScope2: totalScope2.toNumber(),
-          totalScope3: totalScope3.toNumber(),
-          totalBiogenic: totalBiogenic.toNumber(),
-          totalRemovals: totalRemovals.toNumber(),
-          resultsCount: results.length,
-        },
+    await db.auditLogs.create({
+      inventory_id: inventoryId,
+      action: "CALCULATE",
+      entity_type: "Inventory",
+      entity_id: inventoryId,
+      user_id: userId!,
+      user_email: dbUser.email,
+      new_value: {
+        totalScope1: totalScope1.toNumber(),
+        totalScope2: totalScope2.toNumber(),
+        totalScope3: totalScope3.toNumber(),
+        totalBiogenic: totalBiogenic.toNumber(),
+        totalRemovals: totalRemovals.toNumber(),
+        resultsCount: results.length,
       },
     });
 

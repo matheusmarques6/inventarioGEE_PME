@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { z } from "zod";
 import { calculateStationaryCombustion, CombustionResult } from "@/lib/calculations/scope1";
-
-// Type alias for Prisma transaction client
-type PrismaTransactionClient = Omit<
-  typeof prisma,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
 
 // Schema for stationary combustion input
 const stationaryCombustionSchema = z.object({
@@ -44,18 +38,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const activityData = await prisma.activityData.findMany({
-      where: {
-        inventoryId,
-        category: "STATIONARY_COMBUSTION",
-        scope: 1,
-      },
-      include: {
-        unit: true,
-        emissionResults: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const supabase = getDb();
+    const { data: activityData, error } = await supabase
+      .from("activity_data")
+      .select("*, unit:operational_units(*), emission_results(*)")
+      .eq("inventory_id", inventoryId)
+      .eq("category", "STATIONARY_COMBUSTION")
+      .eq("scope", 1)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(activityData);
   } catch (error) {
@@ -90,70 +82,70 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create activity data with emission result in a transaction
-    const result = await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-      // Create activity data
-      const activityData = await tx.activityData.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          unitId: validatedData.unitId,
-          category: "STATIONARY_COMBUSTION",
-          subcategory: validatedData.fuelName,
-          scope: 1,
-          sourceDescription: validatedData.sourceDescription,
-          activityType: validatedData.activityType,
-          quantity: validatedData.quantity,
-          quantityUnit: validatedData.unit,
-          month: validatedData.month,
-          year: validatedData.year,
-          dataSource: validatedData.dataSource,
-          dataQuality: validatedData.dataQuality,
-          uncertainty: validatedData.uncertainty ? validatedData.uncertainty : null,
-          notes: validatedData.notes,
-          metadata: {
-            fuelName: validatedData.fuelName,
-            equipment: validatedData.equipment,
-            sector: validatedData.sector,
-            ethanolPercentage: validatedData.ethanolPercentage,
-            biodieselPercentage: validatedData.biodieselPercentage,
-            consumptionM3: emissionResult.consumptionM3,
-            energyGJ: emissionResult.energyGJ,
-          },
-        },
-      });
-
-      // Create emission result
-      const emission = await tx.emissionResult.create({
-        data: {
-          inventoryId: validatedData.inventoryId,
-          activityDataId: activityData.id,
-          co2Mass: emissionResult.co2Kg,
-          ch4Mass: emissionResult.ch4Kg,
-          n2oMass: emissionResult.n2oKg,
-          co2Equivalent: emissionResult.totalTCO2e,
-          biogenicCo2: emissionResult.biogenicTCO2e,
-          scope: 1,
-          category: "STATIONARY_COMBUSTION",
-          isKyotoGas: true,
-          gwpReference: "AR5",
-          factorsSnapshot: {
-            fuelType: emissionResult.fuelType,
-            energyGJ: emissionResult.energyGJ,
-            co2Kg: emissionResult.co2Kg,
-            ch4Kg: emissionResult.ch4Kg,
-            n2oKg: emissionResult.n2oKg,
-            co2BiogenicKg: emissionResult.co2BiogenicKg,
-          },
-        },
-      });
-
-      // Update inventory totals
-      await updateInventoryTotals(tx, validatedData.inventoryId);
-
-      return { activityData, emission, calculatedEmissions: emissionResult };
+    // Create activity data
+    const activityData = await db.activityData.create({
+      inventory_id: validatedData.inventoryId,
+      unit_id: validatedData.unitId,
+      category: "STATIONARY_COMBUSTION",
+      subcategory: validatedData.fuelName,
+      scope: 1,
+      source_description: validatedData.sourceDescription,
+      activity_type: validatedData.activityType,
+      quantity: validatedData.quantity,
+      quantity_unit: validatedData.unit,
+      month: validatedData.month,
+      year: validatedData.year,
+      data_source: validatedData.dataSource,
+      data_quality: validatedData.dataQuality,
+      uncertainty: validatedData.uncertainty || null,
+      notes: validatedData.notes,
+      metadata: {
+        fuelName: validatedData.fuelName,
+        equipment: validatedData.equipment,
+        sector: validatedData.sector,
+        ethanolPercentage: validatedData.ethanolPercentage,
+        biodieselPercentage: validatedData.biodieselPercentage,
+        consumptionM3: emissionResult.consumptionM3,
+        energyGJ: emissionResult.energyGJ,
+      },
     });
 
-    return NextResponse.json(result, { status: 201 });
+    // Create emission result
+    const emission = await db.emissionResults.create({
+      inventory_id: validatedData.inventoryId,
+      activity_data_id: activityData.id,
+      co2_mass: emissionResult.co2Kg,
+      ch4_mass: emissionResult.ch4Kg,
+      n2o_mass: emissionResult.n2oKg,
+      co2_equivalent: emissionResult.totalTCO2e,
+      biogenic_co2: emissionResult.biogenicTCO2e,
+      scope: 1,
+      category: "STATIONARY_COMBUSTION",
+      is_kyoto_gas: true,
+      gwp_reference: "AR5",
+      factors_snapshot: {
+        fuelType: emissionResult.fuelType,
+        energyGJ: emissionResult.energyGJ,
+        co2Kg: emissionResult.co2Kg,
+        ch4Kg: emissionResult.ch4Kg,
+        n2oKg: emissionResult.n2oKg,
+        co2BiogenicKg: emissionResult.co2BiogenicKg,
+      },
+    });
+
+    // Update inventory totals
+    const totals = await db.emissionResults.sumByInventory(validatedData.inventoryId);
+    await db.inventories.update(validatedData.inventoryId, {
+      total_emissions_scope1: totals.scope1.co2_equivalent,
+      total_emissions_scope2: totals.scope2.co2_equivalent,
+      total_emissions_scope3: totals.scope3.co2_equivalent,
+      total_biogenic_emissions: totals.scope1.biogenic_co2,
+    });
+
+    return NextResponse.json(
+      { activityData, emission, calculatedEmissions: emissionResult },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Error creating stationary combustion data:", error);
 
@@ -169,32 +161,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-// Helper function to update inventory totals
-async function updateInventoryTotals(tx: PrismaTransactionClient, inventoryId: string) {
-  const scope1Total = await tx.emissionResult.aggregate({
-    where: { inventoryId, scope: 1 },
-    _sum: { co2Equivalent: true, biogenicCo2: true },
-  });
-
-  const scope2Total = await tx.emissionResult.aggregate({
-    where: { inventoryId, scope: 2 },
-    _sum: { co2Equivalent: true },
-  });
-
-  const scope3Total = await tx.emissionResult.aggregate({
-    where: { inventoryId, scope: 3 },
-    _sum: { co2Equivalent: true },
-  });
-
-  await tx.inventory.update({
-    where: { id: inventoryId },
-    data: {
-      totalEmissionsScope1: scope1Total._sum.co2Equivalent || 0,
-      totalEmissionsScope2: scope2Total._sum.co2Equivalent || 0,
-      totalEmissionsScope3: scope3Total._sum.co2Equivalent || 0,
-      totalBiogenicEmissions: scope1Total._sum.biogenicCo2 || 0,
-    },
-  });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { requireAuth } from "@/lib/supabase/api";
 
 // GET /api/inventories/[id]/stats - Get emission statistics for an inventory
@@ -19,12 +19,7 @@ export async function GET(
     const { id: inventoryId } = await params;
 
     // Verify access to inventory
-    const inventory = await prisma.inventory.findFirst({
-      where: {
-        id: inventoryId,
-        organizationId: dbUser.organizationId,
-      },
-    });
+    const inventory = await db.inventories.findByIdWithOrg(inventoryId, dbUser.organization_id);
 
     if (!inventory) {
       return NextResponse.json(
@@ -33,32 +28,30 @@ export async function GET(
       );
     }
 
-    // Aggregate emission results by scope
-    const scopeAggregates = await prisma.emissionResult.groupBy({
-      by: ["scope"],
-      where: { inventoryId },
-      _sum: {
-        co2Equivalent: true,
-        biogenicCo2: true,
-        removals: true,
-      },
-    });
+    // Get emission results and aggregate by scope
+    const { data: emissionResults, error: emError } = await getDb()
+      .from("emission_results")
+      .select("scope, co2_equivalent, biogenic_co2, removals")
+      .eq("inventory_id", inventoryId);
 
-    // Calculate totals
+    if (emError) throw emError;
+
+    // Calculate totals by scope
     let scope1 = 0;
     let scope2 = 0;
     let scope3 = 0;
     let biogenic = 0;
     let removals = 0;
 
-    for (const agg of scopeAggregates) {
-      const co2e = Number(agg._sum.co2Equivalent || 0);
-      const bio = Number(agg._sum.biogenicCo2 || 0);
-      const rem = Number(agg._sum.removals || 0);
+    type EmissionRow = { scope: number; co2_equivalent: number | null; biogenic_co2: number | null; removals: number | null };
+    for (const result of (emissionResults as EmissionRow[] | null) || []) {
+      const co2e = Number(result.co2_equivalent || 0);
+      const bio = Number(result.biogenic_co2 || 0);
+      const rem = Number(result.removals || 0);
 
-      if (agg.scope === 1) scope1 = co2e;
-      else if (agg.scope === 2) scope2 = co2e;
-      else if (agg.scope === 3) scope3 = co2e;
+      if (result.scope === 1) scope1 += co2e;
+      else if (result.scope === 2) scope2 += co2e;
+      else if (result.scope === 3) scope3 += co2e;
 
       biogenic += bio;
       removals += rem;
@@ -67,44 +60,42 @@ export async function GET(
     const totalEmissions = scope1 + scope2 + scope3;
 
     // Try to get previous year inventory for comparison
-    const previousInventory = await prisma.inventory.findFirst({
-      where: {
-        organizationId: dbUser.organizationId,
-        baseYear: inventory.baseYear - 1,
-      },
-    });
+    const { data: previousInventory } = await getDb()
+      .from("inventories")
+      .select("id")
+      .eq("organization_id", dbUser.organization_id)
+      .eq("base_year", inventory.base_year - 1)
+      .single();
 
     let previousYear: number | undefined;
-    if (previousInventory) {
-      const prevAggregates = await prisma.emissionResult.groupBy({
-        by: ["scope"],
-        where: { inventoryId: previousInventory.id },
-        _sum: { co2Equivalent: true },
-      });
-      previousYear = prevAggregates.reduce(
-        (sum: number, agg: { scope: number; _sum: { co2Equivalent: unknown } }) =>
-          sum + Number(agg._sum.co2Equivalent || 0),
+    const prevInv = previousInventory as { id: string } | null;
+    if (prevInv) {
+      const { data: prevResults } = await getDb()
+        .from("emission_results")
+        .select("co2_equivalent")
+        .eq("inventory_id", prevInv.id);
+
+      type PrevRow = { co2_equivalent: number | null };
+      previousYear = ((prevResults as PrevRow[] | null) || []).reduce(
+        (sum, r) => sum + Number(r.co2_equivalent || 0),
         0
       );
     }
 
     // Update inventory totals if they've changed
     if (
-      Number(inventory.totalEmissionsScope1 || 0) !== scope1 ||
-      Number(inventory.totalEmissionsScope2 || 0) !== scope2 ||
-      Number(inventory.totalEmissionsScope3 || 0) !== scope3 ||
-      Number(inventory.totalBiogenicEmissions || 0) !== biogenic ||
-      Number(inventory.totalRemovals || 0) !== removals
+      Number(inventory.total_emissions_scope1 || 0) !== scope1 ||
+      Number(inventory.total_emissions_scope2 || 0) !== scope2 ||
+      Number(inventory.total_emissions_scope3 || 0) !== scope3 ||
+      Number(inventory.total_biogenic_emissions || 0) !== biogenic ||
+      Number(inventory.total_removals || 0) !== removals
     ) {
-      await prisma.inventory.update({
-        where: { id: inventoryId },
-        data: {
-          totalEmissionsScope1: scope1,
-          totalEmissionsScope2: scope2,
-          totalEmissionsScope3: scope3,
-          totalBiogenicEmissions: biogenic,
-          totalRemovals: removals,
-        },
+      await db.inventories.update(inventoryId, {
+        total_emissions_scope1: scope1,
+        total_emissions_scope2: scope2,
+        total_emissions_scope3: scope3,
+        total_biogenic_emissions: biogenic,
+        total_removals: removals,
       });
     }
 

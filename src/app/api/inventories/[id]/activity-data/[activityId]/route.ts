@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 
 // DELETE /api/inventories/[id]/activity-data/[activityId] - Delete activity data
 export async function DELETE(
@@ -10,14 +10,9 @@ export async function DELETE(
     const { id: inventoryId, activityId } = await params;
 
     // Verify the activity data exists and belongs to this inventory
-    const activityData = await prisma.activityData.findFirst({
-      where: {
-        id: activityId,
-        inventoryId,
-      },
-    });
+    const activityData = await db.activityData.findById(activityId);
 
-    if (!activityData) {
+    if (!activityData || activityData.inventory_id !== inventoryId) {
       return NextResponse.json(
         { error: "Registro não encontrado" },
         { status: 404 }
@@ -25,38 +20,19 @@ export async function DELETE(
     }
 
     // Delete emission results first (cascade)
-    await prisma.emissionResult.deleteMany({
-      where: { activityDataId: activityId },
-    });
+    await db.emissionResults.deleteByActivityId(activityId);
 
     // Delete the activity data
-    await prisma.activityData.delete({
-      where: { id: activityId },
-    });
+    await db.activityData.delete(activityId);
 
     // Update inventory totals
-    const totals = await prisma.emissionResult.groupBy({
-      by: ["scope"],
-      where: { inventoryId },
-      _sum: { co2Equivalent: true, biogenicCo2: true },
-    });
+    const totals = await db.emissionResults.sumByInventory(inventoryId);
 
-    const scope1Total = totals.find((t) => t.scope === 1)?._sum.co2Equivalent || 0;
-    const scope2Total = totals.find((t) => t.scope === 2)?._sum.co2Equivalent || 0;
-    const scope3Total = totals.find((t) => t.scope === 3)?._sum.co2Equivalent || 0;
-    const biogenicTotal = totals.reduce(
-      (sum, t) => sum + Number(t._sum.biogenicCo2 || 0),
-      0
-    );
-
-    await prisma.inventory.update({
-      where: { id: inventoryId },
-      data: {
-        totalEmissionsScope1: scope1Total,
-        totalEmissionsScope2: scope2Total,
-        totalEmissionsScope3: scope3Total,
-        totalBiogenicEmissions: biogenicTotal,
-      },
+    await db.inventories.update(inventoryId, {
+      total_emissions_scope1: totals.scope1.co2_equivalent,
+      total_emissions_scope2: totals.scope2.co2_equivalent,
+      total_emissions_scope3: totals.scope3.co2_equivalent,
+      total_biogenic_emissions: totals.scope1.biogenic_co2,
     });
 
     return NextResponse.json({ success: true });
@@ -77,18 +53,9 @@ export async function GET(
   try {
     const { id: inventoryId, activityId } = await params;
 
-    const activityData = await prisma.activityData.findFirst({
-      where: {
-        id: activityId,
-        inventoryId,
-      },
-      include: {
-        emissionResults: true,
-        unit: true,
-      },
-    });
+    const activityData = await db.activityData.findById(activityId);
 
-    if (!activityData) {
+    if (!activityData || activityData.inventory_id !== inventoryId) {
       return NextResponse.json(
         { error: "Registro não encontrado" },
         { status: 404 }

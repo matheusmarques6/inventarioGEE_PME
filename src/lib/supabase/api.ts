@@ -1,5 +1,5 @@
 import { createClient } from "./server";
-import { prisma } from "@/lib/db/client";
+import { db, User } from "@/lib/db/supabase-db";
 
 export async function getAuthenticatedUser() {
   const supabase = await createClient();
@@ -10,15 +10,17 @@ export async function getAuthenticatedUser() {
   }
 
   // Get database user
-  const dbUser = await prisma.user.findUnique({
-    where: { supabaseId: user.id },
-    include: { organization: true },
-  });
+  const dbUser = await db.users.findBySupabaseId(user.id);
 
   return { user, dbUser, error: null };
 }
 
-export async function requireAuth() {
+export async function requireAuth(): Promise<{
+  user: { id: string } | null;
+  dbUser: User | null;
+  userId: string | null;
+  error: string | null;
+}> {
   const { user, dbUser, error } = await getAuthenticatedUser();
 
   if (!user) {

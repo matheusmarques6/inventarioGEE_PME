@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 
 const onboardingSchema = z.object({
   userName: z.string().min(3),
@@ -25,10 +24,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = onboardingSchema.parse(body);
 
+    const dbSupabase = getDb();
+
     // Check if user already has an organization
-    const existingUser = await prisma.user.findUnique({
-      where: { supabaseId: user.id },
-    });
+    const { data: existingUser } = await dbSupabase
+      .from("users")
+      .select("id")
+      .eq("supabase_id", user.id)
+      .single();
 
     if (existingUser) {
       return NextResponse.json(
@@ -38,9 +41,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if CNPJ already exists
-    const existingOrg = await prisma.organization.findUnique({
-      where: { cnpj: data.cnpj },
-    });
+    const { data: existingOrg } = await dbSupabase
+      .from("organizations")
+      .select("id")
+      .eq("cnpj", data.cnpj)
+      .single();
 
     if (existingOrg) {
       return NextResponse.json(
@@ -49,50 +54,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create organization and user in a transaction
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Create organization
-      const organization = await tx.organization.create({
-        data: {
-          name: data.organizationName,
-          cnpj: data.cnpj,
-          sector: data.sector,
-          city: data.city,
-          state: data.state,
-        },
-      });
-
-      // Create user
-      const dbUser = await tx.user.create({
-        data: {
-          supabaseId: user.id,
-          email: user.email!,
-          name: data.userName,
-          role: "ADMIN",
-          organizationId: organization.id,
-        },
-      });
-
-      // Create default inventory for current year
-      const currentYear = new Date().getFullYear();
-      const inventory = await tx.inventory.create({
-        data: {
-          organizationId: organization.id,
-          name: `Inventário ${currentYear}`,
-          baseYear: currentYear,
-          reportingPeriod: currentYear.toString(),
-          gwpReference: "AR5",
-          status: "DRAFT",
-          includeScope1: true,
-          includeScope2: true,
-          includeScope3: false,
-        },
-      });
-
-      return { organization, user: dbUser, inventory };
+    // Create organization
+    const organization = await db.organizations.create({
+      name: data.organizationName,
+      cnpj: data.cnpj,
+      sector: data.sector,
+      city: data.city,
+      state: data.state,
     });
 
-    return NextResponse.json(result, { status: 201 });
+    // Create user
+    const dbUser = await db.users.create({
+      supabase_id: user.id,
+      email: user.email!,
+      name: data.userName,
+      role: "ADMIN",
+      organization_id: organization.id,
+    });
+
+    // Create default inventory for current year
+    const currentYear = new Date().getFullYear();
+    const inventory = await db.inventories.create({
+      organization_id: organization.id,
+      name: `Inventário ${currentYear}`,
+      base_year: currentYear,
+      reporting_period: currentYear.toString(),
+      gwp_reference: "AR5",
+      status: "DRAFT",
+      include_scope1: true,
+      include_scope2: true,
+      include_scope3: false,
+    });
+
+    return NextResponse.json({ organization, user: dbUser, inventory }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

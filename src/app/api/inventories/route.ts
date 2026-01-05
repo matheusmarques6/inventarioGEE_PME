@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db } from "@/lib/db/supabase-db";
 import { z } from "zod";
 
 const createInventorySchema = z.object({
@@ -20,22 +20,19 @@ const createInventorySchema = z.object({
 // Helper to get or create default organization
 async function getOrCreateDefaultOrganization() {
   // Try to find existing organization
-  let organization = await prisma.organization.findFirst();
+  let organization = await db.organizations.findFirst();
 
   if (organization) {
     return organization;
   }
 
   // Create default organization using upsert to avoid race conditions
-  organization = await prisma.organization.upsert({
-    where: { cnpj: "00000000000000" },
-    update: {},
-    create: {
-      name: "Minha Empresa",
-      cnpj: "00000000000000",
-      sector: "outros",
-    },
+  organization = await db.organizations.upsert({
+    name: "Minha Empresa",
+    cnpj: "00000000000000",
+    sector: "outros",
   });
+
   return organization;
 }
 
@@ -43,19 +40,15 @@ async function getOrCreateDefaultOrganization() {
 export async function GET() {
   try {
     // Test database connection first
-    await prisma.$queryRaw`SELECT 1`;
+    const health = await db.healthCheck();
+    if (!health.connected) {
+      throw new Error("Database not connected");
+    }
 
     // Ensure organization exists before querying inventories
     await getOrCreateDefaultOrganization();
 
-    const inventories = await prisma.inventory.findMany({
-      orderBy: { baseYear: "desc" },
-      include: {
-        _count: {
-          select: { activityData: true, emissionResults: true },
-        },
-      },
-    });
+    const inventories = await db.inventories.getAllWithCounts();
 
     return NextResponse.json(inventories);
   } catch (error) {
@@ -65,14 +58,14 @@ export async function GET() {
     console.error("Error fetching inventories:", {
       message: errorMessage,
       stack: errorStack,
-      databaseUrl: process.env.DATABASE_URL ? "SET" : "NOT SET",
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? "SET" : "NOT SET",
     });
 
     return NextResponse.json(
       {
         error: "Erro ao carregar inventários",
         details: errorMessage,
-        dbConfigured: !!process.env.DATABASE_URL,
+        supabaseConfigured: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       },
       { status: 500 }
     );
@@ -88,19 +81,17 @@ export async function POST(request: NextRequest) {
     // Get or create default organization
     const organization = await getOrCreateDefaultOrganization();
 
-    const inventory = await prisma.inventory.create({
-      data: {
-        organizationId: organization.id,
-        name: data.name,
-        baseYear: data.baseYear,
-        reportingPeriod: data.reportingPeriod,
-        gwpReference: data.gwpReference,
-        consolidationApproach: data.consolidationApproach,
-        includeScope1: data.includeScope1,
-        includeScope2: data.includeScope2,
-        includeScope3: data.includeScope3,
-        status: "DRAFT",
-      },
+    const inventory = await db.inventories.create({
+      organization_id: organization.id,
+      name: data.name,
+      base_year: data.baseYear,
+      reporting_period: data.reportingPeriod,
+      gwp_reference: data.gwpReference,
+      consolidation_approach: data.consolidationApproach,
+      include_scope1: data.includeScope1,
+      include_scope2: data.includeScope2,
+      include_scope3: data.includeScope3,
+      status: "DRAFT",
     });
 
     return NextResponse.json(inventory, { status: 201 });

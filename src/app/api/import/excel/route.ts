@@ -1,15 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { db, EmissionCategory } from "@/lib/db/supabase-db";
 import * as XLSX from "xlsx";
-import { Prisma } from "@prisma/client";
 import { calculateStationaryCombustion, calculateMobileCombustion, calculateFugitiveEmissions } from "@/lib/calculations/scope1";
 import { calculateFertilizerEmissions, calculateLimestoneEmissions } from "@/lib/emission-factors/fertilizers";
-
-// Type alias for Prisma transaction client
-type PrismaTransactionClient = Omit<
-  typeof prisma,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
 
 interface ImportResult {
   success: boolean;
@@ -159,46 +152,40 @@ async function processStationarySheet(
       });
 
       // Save to database
-      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-        const activityData = await tx.activityData.create({
-          data: {
-            inventoryId,
-            category: "STATIONARY_COMBUSTION",
-            subcategory: fuelName,
-            scope: 1,
-            sourceDescription: `${source} - ${activity}`,
-            activityType: "Combustão estacionária",
-            quantity: quantity,
-            quantityUnit: unit,
-            year,
-            dataSource: "Importação Excel",
-            dataQuality: "PRIMARY",
-            metadata: {
-              fuelName,
-              activity,
-              source,
-              unitName,
-              energyGJ: emissions.energyGJ,
-              importedAt: new Date().toISOString(),
-            },
-          },
-        });
+      const activityData = await db.activityData.create({
+        inventory_id: inventoryId,
+        category: "STATIONARY_COMBUSTION" as EmissionCategory,
+        subcategory: fuelName,
+        scope: 1,
+        source_description: `${source} - ${activity}`,
+        activity_type: "Combustão estacionária",
+        quantity: quantity,
+        quantity_unit: unit,
+        year,
+        data_source: "Importação Excel",
+        data_quality: "PRIMARY",
+        metadata: {
+          fuelName,
+          activity,
+          source,
+          unitName,
+          energyGJ: emissions.energyGJ,
+          importedAt: new Date().toISOString(),
+        },
+      });
 
-        await tx.emissionResult.create({
-          data: {
-            inventoryId,
-            activityDataId: activityData.id,
-            co2Mass: emissions.co2Kg,
-            ch4Mass: emissions.ch4Kg,
-            n2oMass: emissions.n2oKg,
-            co2Equivalent: emissions.totalTCO2e,
-            biogenicCo2: emissions.biogenicTCO2e,
-            scope: 1,
-            category: "STATIONARY_COMBUSTION",
-            isKyotoGas: true,
-            gwpReference: "AR5",
-          },
-        });
+      await db.emissionResults.create({
+        inventory_id: inventoryId,
+        activity_data_id: activityData.id,
+        co2_mass: emissions.co2Kg,
+        ch4_mass: emissions.ch4Kg,
+        n2o_mass: emissions.n2oKg,
+        co2_equivalent: emissions.totalTCO2e,
+        biogenic_co2: emissions.biogenicTCO2e,
+        scope: 1,
+        category: "STATIONARY_COMBUSTION" as EmissionCategory,
+        is_kyoto_gas: true,
+        gwp_reference: "AR5",
       });
 
       imported++;
@@ -272,48 +259,42 @@ async function processMobileSheet(
       );
 
       // Save to database
-      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-        const activityData = await tx.activityData.create({
-          data: {
-            inventoryId,
-            category: "MOBILE_COMBUSTION",
-            subcategory: vehicleType || fuelName,
-            scope: 1,
-            sourceDescription: `${source} - ${activity}`,
-            activityType: "Combustão móvel",
-            quantity: quantity,
-            quantityUnit: unit,
-            year,
-            dataSource: "Importação Excel",
-            dataQuality: "PRIMARY",
-            metadata: {
-              fuelName,
-              activity,
-              source,
-              unitName,
-              vehicleType,
-              isOffroad,
-              energyGJ: emissions.energyGJ,
-              importedAt: new Date().toISOString(),
-            },
-          },
-        });
+      const activityData = await db.activityData.create({
+        inventory_id: inventoryId,
+        category: "MOBILE_COMBUSTION" as EmissionCategory,
+        subcategory: vehicleType || fuelName,
+        scope: 1,
+        source_description: `${source} - ${activity}`,
+        activity_type: "Combustão móvel",
+        quantity: quantity,
+        quantity_unit: unit,
+        year,
+        data_source: "Importação Excel",
+        data_quality: "PRIMARY",
+        metadata: {
+          fuelName,
+          activity,
+          source,
+          unitName,
+          vehicleType,
+          isOffroad,
+          energyGJ: emissions.energyGJ,
+          importedAt: new Date().toISOString(),
+        },
+      });
 
-        await tx.emissionResult.create({
-          data: {
-            inventoryId,
-            activityDataId: activityData.id,
-            co2Mass: emissions.co2Kg,
-            ch4Mass: emissions.ch4Kg,
-            n2oMass: emissions.n2oKg,
-            co2Equivalent: emissions.totalTCO2e,
-            biogenicCo2: emissions.biogenicTCO2e,
-            scope: 1,
-            category: "MOBILE_COMBUSTION",
-            isKyotoGas: true,
-            gwpReference: "AR5",
-          },
-        });
+      await db.emissionResults.create({
+        inventory_id: inventoryId,
+        activity_data_id: activityData.id,
+        co2_mass: emissions.co2Kg,
+        ch4_mass: emissions.ch4Kg,
+        n2o_mass: emissions.n2oKg,
+        co2_equivalent: emissions.totalTCO2e,
+        biogenic_co2: emissions.biogenicTCO2e,
+        scope: 1,
+        category: "MOBILE_COMBUSTION" as EmissionCategory,
+        is_kyoto_gas: true,
+        gwp_reference: "AR5",
       });
 
       imported++;
@@ -375,43 +356,37 @@ async function processFugitiveSheet(
       });
 
       // Save to database
-      await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-        const activityData = await tx.activityData.create({
-          data: {
-            inventoryId,
-            category: "FUGITIVE_EMISSIONS",
-            subcategory: gasName,
-            scope: 1,
-            sourceDescription: commercialName || gasName,
-            activityType: "Emissões fugitivas",
-            quantity: quantity,
-            quantityUnit: "kg",
-            year,
-            dataSource: "Importação Excel",
-            dataQuality: "PRIMARY",
-            metadata: {
-              gasName,
-              commercialName,
-              unitName,
-              gwp: emissions.gwp,
-              isKyoto: emissions.isKyoto,
-              importedAt: new Date().toISOString(),
-            },
-          },
-        });
+      const activityData = await db.activityData.create({
+        inventory_id: inventoryId,
+        category: "FUGITIVE_EMISSIONS" as EmissionCategory,
+        subcategory: gasName,
+        scope: 1,
+        source_description: commercialName || gasName,
+        activity_type: "Emissões fugitivas",
+        quantity: quantity,
+        quantity_unit: "kg",
+        year,
+        data_source: "Importação Excel",
+        data_quality: "PRIMARY",
+        metadata: {
+          gasName,
+          commercialName,
+          unitName,
+          gwp: emissions.gwp,
+          isKyoto: emissions.isKyoto,
+          importedAt: new Date().toISOString(),
+        },
+      });
 
-        await tx.emissionResult.create({
-          data: {
-            inventoryId,
-            activityDataId: activityData.id,
-            hfcMass: quantity,
-            co2Equivalent: emissions.totalTCO2e,
-            scope: 1,
-            category: "FUGITIVE_EMISSIONS",
-            isKyotoGas: emissions.isKyoto,
-            gwpReference: "AR5",
-          },
-        });
+      await db.emissionResults.create({
+        inventory_id: inventoryId,
+        activity_data_id: activityData.id,
+        hfc_mass: quantity,
+        co2_equivalent: emissions.totalTCO2e,
+        scope: 1,
+        category: "FUGITIVE_EMISSIONS" as EmissionCategory,
+        is_kyoto_gas: emissions.isKyoto,
+        gwp_reference: "AR5",
       });
 
       imported++;
@@ -481,44 +456,38 @@ async function processFertilizerSheet(
           quantity,
         });
 
-        await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-          const activityData = await tx.activityData.create({
-            data: {
-              inventoryId,
-              category: "AGRICULTURAL",
-              subcategory: `Calcário ${type === "calcitic" ? "calcítico" : "dolomítico"}`,
-              scope: 1,
-              sourceDescription: fertilizerName,
-              activityType: "Aplicação de calcário",
-              quantity: quantity,
-              quantityUnit: "kg",
-              year,
-              dataSource: "Importação Excel",
-              dataQuality: "PRIMARY",
-              metadata: {
-                fertilizerName,
-                limestoneType: type,
-                caoContent,
-                mgoContent,
-                unitName,
-                caco3Equivalent: emissions.caco3Equivalent,
-                importedAt: new Date().toISOString(),
-              },
-            },
-          });
+        const activityData = await db.activityData.create({
+          inventory_id: inventoryId,
+          category: "AGRICULTURAL" as EmissionCategory,
+          subcategory: `Calcário ${type === "calcitic" ? "calcítico" : "dolomítico"}`,
+          scope: 1,
+          source_description: fertilizerName,
+          activity_type: "Aplicação de calcário",
+          quantity: quantity,
+          quantity_unit: "kg",
+          year,
+          data_source: "Importação Excel",
+          data_quality: "PRIMARY",
+          metadata: {
+            fertilizerName,
+            limestoneType: type,
+            caoContent,
+            mgoContent,
+            unitName,
+            caco3Equivalent: emissions.caco3Equivalent,
+            importedAt: new Date().toISOString(),
+          },
+        });
 
-          await tx.emissionResult.create({
-            data: {
-              inventoryId,
-              activityDataId: activityData.id,
-              co2Mass: emissions.co2Kg,
-              co2Equivalent: emissions.totalTCO2e,
-              scope: 1,
-              category: "AGRICULTURAL",
-              isKyotoGas: true,
-              gwpReference: "AR5",
-            },
-          });
+        await db.emissionResults.create({
+          inventory_id: inventoryId,
+          activity_data_id: activityData.id,
+          co2_mass: emissions.co2Kg,
+          co2_equivalent: emissions.totalTCO2e,
+          scope: 1,
+          category: "AGRICULTURAL" as EmissionCategory,
+          is_kyoto_gas: true,
+          gwp_reference: "AR5",
         });
       } else {
         // Nitrogen fertilizer
@@ -532,44 +501,38 @@ async function processFertilizerSheet(
           quantity,
         });
 
-        await prisma.$transaction(async (tx: PrismaTransactionClient) => {
-          const activityData = await tx.activityData.create({
-            data: {
-              inventoryId,
-              category: "AGRICULTURAL",
-              subcategory: fertilizerName,
-              scope: 1,
-              sourceDescription: fertilizerName,
-              activityType: "Aplicação de fertilizante",
-              quantity: quantity,
-              quantityUnit: "kg",
-              year,
-              dataSource: "Importação Excel",
-              dataQuality: "PRIMARY",
-              metadata: {
-                fertilizerName,
-                nitrogenContent,
-                isUrea,
-                unitName,
-                nitrogenApplied: emissions.nitrogenApplied,
-                importedAt: new Date().toISOString(),
-              },
-            },
-          });
+        const activityData = await db.activityData.create({
+          inventory_id: inventoryId,
+          category: "AGRICULTURAL" as EmissionCategory,
+          subcategory: fertilizerName,
+          scope: 1,
+          source_description: fertilizerName,
+          activity_type: "Aplicação de fertilizante",
+          quantity: quantity,
+          quantity_unit: "kg",
+          year,
+          data_source: "Importação Excel",
+          data_quality: "PRIMARY",
+          metadata: {
+            fertilizerName,
+            nitrogenContent,
+            isUrea,
+            unitName,
+            nitrogenApplied: emissions.nitrogenApplied,
+            importedAt: new Date().toISOString(),
+          },
+        });
 
-          await tx.emissionResult.create({
-            data: {
-              inventoryId,
-              activityDataId: activityData.id,
-              co2Mass: emissions.co2Kg,
-              n2oMass: emissions.n2oKg,
-              co2Equivalent: emissions.totalTCO2e,
-              scope: 1,
-              category: "AGRICULTURAL",
-              isKyotoGas: true,
-              gwpReference: "AR5",
-            },
-          });
+        await db.emissionResults.create({
+          inventory_id: inventoryId,
+          activity_data_id: activityData.id,
+          co2_mass: emissions.co2Kg,
+          n2o_mass: emissions.n2oKg,
+          co2_equivalent: emissions.totalTCO2e,
+          scope: 1,
+          category: "AGRICULTURAL" as EmissionCategory,
+          is_kyoto_gas: true,
+          gwp_reference: "AR5",
         });
       }
 

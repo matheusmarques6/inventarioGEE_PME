@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { getDb } from "@/lib/db/supabase-db";
 
 export async function GET() {
   const checks = {
     timestamp: new Date().toISOString(),
     database: {
-      configured: !!process.env.DATABASE_URL,
+      configured: !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       connected: false,
       error: null as string | null,
     },
@@ -17,20 +17,28 @@ export async function GET() {
   };
 
   try {
-    // Test database connection
-    await prisma.$queryRaw`SELECT 1`;
+    const supabase = getDb();
+
+    // Test database connection and count organizations
+    const { count: orgCount, error: orgError } = await supabase
+      .from("organizations")
+      .select("*", { count: "exact", head: true });
+
+    if (orgError) throw orgError;
     checks.database.connected = true;
+    checks.tables.organizations = orgCount || 0;
 
-    // Count records in main tables
-    const [orgCount, invCount, userCount] = await Promise.all([
-      prisma.organization.count(),
-      prisma.inventory.count(),
-      prisma.user.count(),
-    ]);
+    // Count inventories
+    const { count: invCount } = await supabase
+      .from("inventories")
+      .select("*", { count: "exact", head: true });
+    checks.tables.inventories = invCount || 0;
 
-    checks.tables.organizations = orgCount;
-    checks.tables.inventories = invCount;
-    checks.tables.users = userCount;
+    // Count users
+    const { count: userCount } = await supabase
+      .from("users")
+      .select("*", { count: "exact", head: true });
+    checks.tables.users = userCount || 0;
 
     return NextResponse.json({
       status: "healthy",

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { Prisma } from "@prisma/client";
+import { db, getDb } from "@/lib/db/supabase-db";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import {
@@ -42,18 +41,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const activityData = await prisma.activityData.findMany({
-      where: {
-        inventoryId,
-        category: "LULUCF",
-        scope: 1,
-      },
-      include: {
-        emissionResults: true,
-        unit: true,
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const supabase = getDb();
+    const { data: activityData, error } = await supabase
+      .from("activity_data")
+      .select("*, emission_results(*), unit:operational_units(*)")
+      .eq("inventory_id", inventoryId)
+      .eq("category", "LULUCF")
+      .eq("scope", 1)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(activityData);
   } catch (error) {
@@ -72,9 +69,7 @@ export async function POST(request: NextRequest) {
     const data = forestSchema.parse(body);
 
     // Get inventory for GWP reference
-    const inventory = await prisma.inventory.findUnique({
-      where: { id: data.inventoryId },
-    });
+    const inventory = await db.inventories.findById(data.inventoryId);
 
     if (!inventory) {
       return NextResponse.json(
@@ -83,7 +78,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const gwpReference = (inventory.gwpReference || "AR5") as GWPReference;
+    const gwpReference = (inventory.gwp_reference || "AR5") as GWPReference;
 
     let co2Equivalent = 0;
     let removals = 0;
@@ -103,7 +98,6 @@ export async function POST(request: NextRequest) {
 
       const result = calculateForestRemovals(forestInput, gwpReference);
 
-      // Removals are negative (sequestration)
       removals = result.removals ? Number(result.removals) : 0;
       co2Equivalent = result.co2Equivalent ? Number(result.co2Equivalent) : 0;
       biogenicCo2 = result.biogenicCo2 ? Number(result.biogenicCo2) : 0;
@@ -118,9 +112,7 @@ export async function POST(request: NextRequest) {
         factorsSnapshot: result.factorsSnapshot,
       };
     } else if (data.forestType === "native" && data.biome) {
-      // Calculate for native forest
       if (data.activityType === "growth") {
-        // Carbon sequestration
         removals = calculateNativeRemovals(data.biome, data.area, false);
         calculatedDetails = {
           type: "native_forest_growth",
@@ -130,9 +122,8 @@ export async function POST(request: NextRequest) {
           annualIncrement: ANNUAL_INCREMENT[data.biome]?.secundaria || 0,
         };
       } else if (data.activityType === "deforestation") {
-        // Deforestation emissions
         const carbonStock = getNativeCarbonStock(data.biome, data.physiognomy);
-        co2Equivalent = data.area * carbonStock * (44 / 12); // Convert tC to tCO2
+        co2Equivalent = data.area * carbonStock * (44 / 12);
         biogenicCo2 = co2Equivalent;
         calculatedDetails = {
           type: "deforestation",
@@ -143,9 +134,8 @@ export async function POST(request: NextRequest) {
         };
       }
     } else if (data.forestType === "restoration") {
-      // Restoration removals (simplified)
-      const incrementRate = 2.0; // tC/ha/year for restoration
-      removals = -(data.area * incrementRate * (44 / 12)); // Negative = sequestration
+      const incrementRate = 2.0;
+      removals = -(data.area * incrementRate * (44 / 12));
       calculatedDetails = {
         type: "restoration",
         area: data.area,
@@ -153,57 +143,50 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    // Determine if this is an emission or removal for activity type naming
     const isRemoval = removals < 0;
 
     // Create activity data record
-    const activityData = await prisma.activityData.create({
-      data: {
-        inventoryId: data.inventoryId,
-        category: "LULUCF",
-        subcategory: data.forestType,
-        scope: 1,
-        sourceDescription: data.sourceDescription,
+    const activityData = await db.activityData.create({
+      inventory_id: data.inventoryId,
+      category: "LULUCF",
+      subcategory: data.forestType,
+      scope: 1,
+      source_description: data.sourceDescription,
+      activity_type: data.activityType,
+      quantity: data.area,
+      quantity_unit: "ha",
+      month: data.month,
+      year: data.year,
+      data_source: data.dataSource || "Manual",
+      data_quality: "SECONDARY_CALC",
+      notes: data.notes,
+      metadata: {
+        forestType: data.forestType,
         activityType: data.activityType,
-        quantity: data.area,
-        quantityUnit: "ha",
-        month: data.month,
-        year: data.year,
-        dataSource: data.dataSource || "Manual",
-        dataQuality: "SECONDARY_CALC",
-        notes: data.notes,
-        metadata: {
-          forestType: data.forestType,
-          activityType: data.activityType,
-          species: data.species,
-          clone: data.clone,
-          biome: data.biome,
-          physiognomy: data.physiognomy,
-          age: data.age,
-          volume: data.volume,
-          isRemoval,
-          calculatedDetails,
-        } as Prisma.InputJsonValue,
+        species: data.species,
+        clone: data.clone,
+        biome: data.biome,
+        physiognomy: data.physiognomy,
+        age: data.age,
+        volume: data.volume,
+        isRemoval,
+        calculatedDetails,
       },
     });
 
     // Create emission result
-    const emissionResult = await prisma.emissionResult.create({
-      data: {
-        inventoryId: data.inventoryId,
-        activityDataId: activityData.id,
-        co2Mass: co2Equivalent * 1000, // kg
-        co2Equivalent,
-        biogenicCo2,
-        removals,
-        scope: 1,
-        category: "LULUCF",
-        isKyotoGas: true,
-        calculatedAt: new Date(),
-        calculationVersion: "1.0",
-        gwpReference,
-        factorsSnapshot: calculatedDetails as Prisma.InputJsonValue,
-      },
+    const emissionResult = await db.emissionResults.create({
+      inventory_id: data.inventoryId,
+      activity_data_id: activityData.id,
+      co2_mass: co2Equivalent * 1000,
+      co2_equivalent: co2Equivalent,
+      biogenic_co2: biogenicCo2,
+      removals,
+      scope: 1,
+      category: "LULUCF",
+      is_kyoto_gas: true,
+      gwp_reference: gwpReference,
+      factors_snapshot: calculatedDetails,
     });
 
     // Update inventory totals
@@ -242,36 +225,38 @@ export async function POST(request: NextRequest) {
 
 // Helper function to update inventory totals
 async function updateInventoryTotals(inventoryId: string) {
-  const totals = await prisma.emissionResult.groupBy({
-    by: ["scope"],
-    where: { inventoryId },
-    _sum: { co2Equivalent: true, biogenicCo2: true, removals: true },
-  });
+  const supabase = getDb();
 
-  const scope1Total =
-    totals.find((t) => t.scope === 1)?._sum.co2Equivalent || 0;
-  const scope2Total =
-    totals.find((t) => t.scope === 2)?._sum.co2Equivalent || 0;
-  const scope3Total =
-    totals.find((t) => t.scope === 3)?._sum.co2Equivalent || 0;
-  const biogenicTotal = totals.reduce(
-    (sum, t) => sum + Number(t._sum.biogenicCo2 || 0),
-    0
-  );
-  const removalsTotal = totals.reduce(
-    (sum, t) => sum + Number(t._sum.removals || 0),
-    0
-  );
+  const { data: results } = await supabase
+    .from("emission_results")
+    .select("scope, co2_equivalent, biogenic_co2, removals")
+    .eq("inventory_id", inventoryId);
 
-  await prisma.inventory.update({
-    where: { id: inventoryId },
-    data: {
-      totalEmissionsScope1: scope1Total,
-      totalEmissionsScope2: scope2Total,
-      totalEmissionsScope3: scope3Total,
-      totalBiogenicEmissions: biogenicTotal,
-      totalRemovals: removalsTotal,
+  type EmissionRow = { scope: number; co2_equivalent: number | null; biogenic_co2: number | null; removals: number | null };
+  const typedResults = (results as EmissionRow[] | null) || [];
+
+  const totals = typedResults.reduce(
+    (acc, r) => {
+      if (r.scope === 1) {
+        acc.scope1 += Number(r.co2_equivalent) || 0;
+        acc.biogenic += Number(r.biogenic_co2) || 0;
+        acc.removals += Number(r.removals) || 0;
+      } else if (r.scope === 2) {
+        acc.scope2 += Number(r.co2_equivalent) || 0;
+      } else if (r.scope === 3) {
+        acc.scope3 += Number(r.co2_equivalent) || 0;
+      }
+      return acc;
     },
+    { scope1: 0, scope2: 0, scope3: 0, biogenic: 0, removals: 0 }
+  );
+
+  await db.inventories.update(inventoryId, {
+    total_emissions_scope1: totals.scope1,
+    total_emissions_scope2: totals.scope2,
+    total_emissions_scope3: totals.scope3,
+    total_biogenic_emissions: totals.biogenic,
+    total_removals: totals.removals,
   });
 }
 

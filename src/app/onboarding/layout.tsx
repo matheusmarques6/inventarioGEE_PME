@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
-import { prisma } from "@/lib/db/client";
+import { db } from "@/lib/db/supabase-db";
 
 export default async function OnboardingLayout({
   children,
@@ -14,9 +14,7 @@ export default async function OnboardingLayout({
   }
 
   // Check if user already has an organization
-  const dbUser = await prisma.user.findUnique({
-    where: { supabaseId: user.id },
-  });
+  const dbUser = await db.users.findBySupabaseId(user.id);
 
   // If user already exists in database, redirect to dashboard
   if (dbUser) {
