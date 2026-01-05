@@ -21,11 +21,20 @@ export function calculateStationaryCombustion(
     gwpReference
   );
 
+  console.log("[Stationary] Input received:", {
+    fuelType: input.fuelType,
+    quantity: input.quantity?.toString?.() || input.quantity,
+    unit: input.unit,
+    year: input.year,
+  });
+
   const factor = getEmissionFactor(input.fuelType, "stationary");
   if (!factor) {
-    console.warn(`No emission factor found for fuel: ${input.fuelType}`);
+    console.warn(`[Stationary] No emission factor found for fuel: "${input.fuelType}"`);
+    console.log("[Stationary] Available fuels:", Object.keys(STATIONARY_COMBUSTION_FACTORS));
     return result;
   }
+  console.log("[Stationary] Factor found:", factor.name);
 
   // Get quantity in m³ or the appropriate unit
   let quantity = input.quantity;
@@ -114,6 +123,13 @@ export function calculateStationaryCombustion(
     fossilFraction: fractions.fossil,
     renewableFraction: fractions.renewable,
   };
+
+  console.log("[Stationary] Calculation complete:", {
+    energyGJ: energyGJ.toString(),
+    co2Tonnes: co2Tonnes.toString(),
+    co2Mass: result.co2Mass.toString(),
+    co2Equivalent: result.co2Equivalent.toString(),
+  });
 
   return result;
 }

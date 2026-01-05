@@ -1,9 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, EmissionCategory } from "@/lib/db/supabase-db";
+import { db, EmissionCategory, ActivityData } from "@/lib/db/supabase-db";
 import { requireAuth } from "@/lib/supabase/api";
 import { z } from "zod";
 import Decimal from "decimal.js";
 import { quickCalculate } from "@/lib/calculation-engine";
+
+// Transform snake_case database response to camelCase for frontend
+function transformActivityData(data: ActivityData) {
+  return {
+    id: data.id,
+    inventoryId: data.inventory_id,
+    unitId: data.unit_id,
+    category: data.category,
+    subcategory: data.subcategory,
+    scope: data.scope,
+    sourceDescription: data.source_description,
+    activityType: data.activity_type,
+    quantity: data.quantity,
+    quantityUnit: data.quantity_unit,
+    month: data.month,
+    year: data.year,
+    dataSource: data.data_source,
+    dataQuality: data.data_quality,
+    uncertainty: data.uncertainty,
+    evidenceUrl: data.evidence_url,
+    notes: data.notes,
+    emissionFactorId: data.emission_factor_id,
+    metadata: data.metadata,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    createdBy: data.created_by,
+    unit: data.unit,
+    emissionResults: data.emission_results?.map(er => ({
+      id: er.id,
+      inventoryId: er.inventory_id,
+      activityDataId: er.activity_data_id,
+      co2Mass: er.co2_mass,
+      ch4Mass: er.ch4_mass,
+      n2oMass: er.n2o_mass,
+      co2Equivalent: er.co2_equivalent,
+      biogenicCo2: er.biogenic_co2,
+      removals: er.removals,
+      scope: er.scope,
+      category: er.category,
+      isKyotoGas: er.is_kyoto_gas,
+      gwpReference: er.gwp_reference,
+      factorsSnapshot: er.factors_snapshot,
+    })),
+  };
+}
 
 const emissionCategories: [EmissionCategory, ...EmissionCategory[]] = [
   "STATIONARY_COMBUSTION",
@@ -102,7 +147,7 @@ export async function GET(
     ]);
 
     return NextResponse.json({
-      data: activityData,
+      data: activityData.map(transformActivityData),
       pagination: {
         page,
         limit,
@@ -179,22 +224,45 @@ export async function POST(
       ...data.metadata,
     };
 
+    console.log("Calculation input:", {
+      fuelType: calculationInput.fuelType,
+      quantity: calculationInput.quantity.toString(),
+      unit: calculationInput.unit,
+      year: calculationInput.year,
+      category: data.category,
+    });
+
     const emissionResult = quickCalculate(
       data.category,
       calculationInput as Record<string, unknown>,
       inventory.gwp_reference
     );
 
+    console.log("Emission result:", {
+      co2Mass: emissionResult.co2Mass?.toString(),
+      ch4Mass: emissionResult.ch4Mass?.toString(),
+      n2oMass: emissionResult.n2oMass?.toString(),
+      co2Equivalent: emissionResult.co2Equivalent?.toString(),
+      factorsSnapshot: emissionResult.factorsSnapshot,
+    });
+
+    // Convert Decimal to number safely
+    const toNumber = (value: Decimal | null | undefined): number | null => {
+      if (!value) return null;
+      const num = value.toNumber();
+      return isNaN(num) ? 0 : num;
+    };
+
     // Save emission result
     const savedResult = await db.emissionResults.create({
       inventory_id: inventoryId,
       activity_data_id: activityData.id,
-      co2_mass: emissionResult.co2Mass ? Number(emissionResult.co2Mass) : null,
-      ch4_mass: emissionResult.ch4Mass ? Number(emissionResult.ch4Mass) : null,
-      n2o_mass: emissionResult.n2oMass ? Number(emissionResult.n2oMass) : null,
-      co2_equivalent: Number(emissionResult.co2Equivalent),
-      biogenic_co2: emissionResult.biogenicCo2 ? Number(emissionResult.biogenicCo2) : null,
-      removals: emissionResult.removals ? Number(emissionResult.removals) : null,
+      co2_mass: toNumber(emissionResult.co2Mass),
+      ch4_mass: toNumber(emissionResult.ch4Mass),
+      n2o_mass: toNumber(emissionResult.n2oMass),
+      co2_equivalent: toNumber(emissionResult.co2Equivalent) || 0,
+      biogenic_co2: toNumber(emissionResult.biogenicCo2),
+      removals: toNumber(emissionResult.removals),
       scope: data.scope,
       category: data.category,
       is_kyoto_gas: emissionResult.isKyotoGas,
