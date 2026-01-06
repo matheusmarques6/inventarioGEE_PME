@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Download, FileText, FileSpreadsheet, FileJson, Calendar, CheckCircle, Loader2, AlertCircle, Trash2 } from "lucide-react";
+import {
+  Download,
+  FileText,
+  FileSpreadsheet,
+  FileJson,
+  Calendar,
+  CheckCircle,
+  Loader2,
+  AlertCircle,
+  Trash2,
+  Plus,
+  Eye,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,37 +37,9 @@ import {
 import { useInventory } from "@/contexts/inventory-context";
 import { toast } from "@/components/ui/use-toast";
 import Link from "next/link";
-
-const reportTypes = [
-  {
-    id: "GHG_PROTOCOL",
-    name: "Relatório GHG Protocol",
-    description: "Relatório completo seguindo metodologia GHG Protocol",
-    icon: FileText,
-    formats: ["JSON"] as const,
-  },
-  {
-    id: "EXECUTIVE_SUMMARY",
-    name: "Sumário Executivo",
-    description: "Resumo das principais emissões e indicadores",
-    icon: FileText,
-    formats: ["JSON"] as const,
-  },
-  {
-    id: "SBCE",
-    name: "Relatório SBCE",
-    description: "Formato para Sistema Brasileiro de Comércio de Emissões",
-    icon: FileText,
-    formats: ["JSON"] as const,
-  },
-  {
-    id: "CUSTOM",
-    name: "Relatório Detalhado",
-    description: "Todos os dados de atividade e cálculos",
-    icon: FileSpreadsheet,
-    formats: ["JSON"] as const,
-  },
-];
+import { ReportWizardModal, type ReportFormData } from "@/components/reports/report-wizard-modal";
+import { ReportViewer, type ReportData } from "@/components/reports/report-viewer";
+import { exportReportToPDF } from "@/lib/pdf-export";
 
 interface Report {
   id: string;
@@ -68,6 +52,7 @@ interface Report {
     name: string;
     baseYear: number;
   };
+  reportData?: ReportData;
 }
 
 const formatLabels: Record<string, string> = {
@@ -81,17 +66,35 @@ const typeLabels: Record<string, string> = {
   GHG_PROTOCOL: "GHG Protocol",
   EXECUTIVE_SUMMARY: "Sumário Executivo",
   SBCE: "SBCE",
-  CUSTOM: "Detalhado",
+  CUSTOM: "Personalizado",
   GRI: "GRI",
   CDP: "CDP",
+};
+
+const categoryLabels: Record<string, string> = {
+  STATIONARY_COMBUSTION: "Combustão Estacionária",
+  MOBILE_COMBUSTION: "Combustão Móvel",
+  FUGITIVE_EMISSIONS: "Emissões Fugitivas",
+  PROCESS_EMISSIONS: "Emissões de Processo",
+  AGRICULTURAL: "Agrícola",
+  LULUCF: "Mudança de Uso do Solo",
+  PURCHASED_ELECTRICITY: "Energia Elétrica",
+  PURCHASED_HEAT: "Calor/Vapor",
+  UPSTREAM_TRANSPORT: "Transporte Upstream",
+  DOWNSTREAM_TRANSPORT: "Transporte Downstream",
+  WASTE_EXTERNAL: "Resíduos",
+  BUSINESS_TRAVEL: "Viagens a Negócio",
+  EMPLOYEE_COMMUTING: "Deslocamento de Funcionários",
 };
 
 export default function ReportsPage() {
   const { currentInventory, isLoading: inventoryLoading } = useInventory();
   const [reports, setReports] = useState<Report[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [generatingType, setGeneratingType] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [viewingReport, setViewingReport] = useState<ReportData | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const fetchReports = useCallback(async () => {
     if (!currentInventory?.id) return;
@@ -116,7 +119,7 @@ export default function ReportsPage() {
     fetchReports();
   }, [fetchReports]);
 
-  const handleGenerate = async (typeId: string, format: string) => {
+  const handleCreateReport = async (formData: ReportFormData) => {
     if (!currentInventory?.id) {
       toast({
         title: "Erro",
@@ -126,15 +129,14 @@ export default function ReportsPage() {
       return;
     }
 
-    setGeneratingType(typeId);
+    setIsGenerating(true);
     try {
-      const response = await fetch("/api/reports", {
+      const response = await fetch("/api/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           inventoryId: currentInventory.id,
-          type: typeId,
-          format,
+          ...formData,
         }),
       });
 
@@ -146,22 +148,13 @@ export default function ReportsPage() {
       const result = await response.json();
 
       toast({
-        title: "Relatório gerado",
-        description: result.message,
+        title: "Relatório gerado com sucesso!",
+        description: "Visualize o relatório abaixo",
       });
 
-      // Download the report
-      const blob = new Blob([JSON.stringify(result.data, null, 2)], {
-        type: "application/json",
-      });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = result.report.fileName;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      // Show the report viewer
+      setViewingReport(result.reportData);
+      setIsWizardOpen(false);
 
       // Refresh reports list
       fetchReports();
@@ -172,17 +165,38 @@ export default function ReportsPage() {
         variant: "destructive",
       });
     } finally {
-      setGeneratingType(null);
+      setIsGenerating(false);
     }
   };
 
-  const handleDownload = async (report: Report) => {
+  const handleViewReport = async (report: Report) => {
     try {
-      const response = await fetch(`/api/reports/download?id=${report.id}`);
+      const response = await fetch(`/api/reports/${report.id}`);
+      if (!response.ok) throw new Error("Erro ao carregar relatório");
+
+      const data = await response.json();
+      setViewingReport(data.reportData);
+    } catch (error) {
+      toast({
+        title: "Erro ao carregar relatório",
+        description: "Tente novamente",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!viewingReport) return;
+    await exportReportToPDF(viewingReport);
+  };
+
+  const handleDownloadJSON = async (report: Report) => {
+    try {
+      const response = await fetch(`/api/reports/${report.id}`);
       if (!response.ok) throw new Error("Erro ao baixar");
 
       const data = await response.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
+      const blob = new Blob([JSON.stringify(data.reportData, null, 2)], {
         type: "application/json",
       });
       const url = window.URL.createObjectURL(blob);
@@ -253,67 +267,88 @@ export default function ReportsPage() {
     );
   }
 
+  // If viewing a report, show the viewer
+  if (viewingReport) {
+    return (
+      <ReportViewer
+        data={viewingReport}
+        onBack={() => setViewingReport(null)}
+        onExportPDF={handleExportPDF}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Download className="h-6 w-6 text-primary" />
+            <FileText className="h-6 w-6 text-primary" />
             Relatórios
           </h1>
           <p className="text-muted-foreground">
-            Gere e exporte relatórios do inventário - {currentInventory.name}
+            Crie e visualize relatórios de emissões - {currentInventory.name}
           </p>
         </div>
-        <Badge variant="outline" className="text-sm">
-          Ano base: {currentInventory.baseYear}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-sm">
+            Ano base: {currentInventory.baseYear}
+          </Badge>
+          <Button onClick={() => setIsWizardOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Novo Relatório
+          </Button>
+        </div>
       </div>
 
-      {/* Report Types */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {reportTypes.map((report) => (
-          <Card key={report.id} className="hover:shadow-md transition-shadow">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-primary/10">
-                    <report.icon className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">{report.name}</CardTitle>
-                    <CardDescription className="mt-1">
-                      {report.description}
-                    </CardDescription>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
+      {/* Report Creation Wizard */}
+      <ReportWizardModal
+        open={isWizardOpen}
+        onOpenChange={setIsWizardOpen}
+        onSubmit={handleCreateReport}
+        inventoryYear={currentInventory.baseYear}
+      />
+
+      {/* Quick Create Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {[
+          {
+            type: "GHG_PROTOCOL",
+            name: "GHG Protocol",
+            description: "Relatório completo internacional",
+            color: "bg-green-100 border-green-200 text-green-800",
+          },
+          {
+            type: "EXECUTIVE_SUMMARY",
+            name: "Sumário Executivo",
+            description: "Resumo com indicadores",
+            color: "bg-blue-100 border-blue-200 text-blue-800",
+          },
+          {
+            type: "SBCE",
+            name: "SBCE",
+            description: "Sistema Brasileiro de Emissões",
+            color: "bg-yellow-100 border-yellow-200 text-yellow-800",
+          },
+          {
+            type: "CUSTOM",
+            name: "Personalizado",
+            description: "Configure suas opções",
+            color: "bg-purple-100 border-purple-200 text-purple-800",
+          },
+        ].map((item) => (
+          <Card
+            key={item.type}
+            className={`cursor-pointer hover:shadow-md transition-all border-2 ${item.color}`}
+            onClick={() => setIsWizardOpen(true)}
+          >
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between">
-                <div className="flex gap-2">
-                  {report.formats.map((format) => (
-                    <Badge key={format} variant="outline">
-                      {formatLabels[format] || format}
-                    </Badge>
-                  ))}
+                <div>
+                  <p className="font-semibold">{item.name}</p>
+                  <p className="text-sm opacity-80">{item.description}</p>
                 </div>
-                <Button
-                  onClick={() => handleGenerate(report.id, report.formats[0])}
-                  disabled={generatingType !== null}
-                >
-                  {generatingType === report.id ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="mr-2 h-4 w-4" />
-                      Gerar
-                    </>
-                  )}
-                </Button>
+                <Plus className="h-5 w-5 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -328,7 +363,7 @@ export default function ReportsPage() {
             Relatórios Gerados
           </CardTitle>
           <CardDescription>
-            Histórico de relatórios disponíveis para download
+            Visualize, baixe ou exclua relatórios anteriores
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -337,10 +372,16 @@ export default function ReportsPage() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : reports.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Nenhum relatório gerado ainda</p>
-              <p className="text-sm">Use os botões acima para gerar relatórios</p>
+            <div className="text-center py-12 text-muted-foreground">
+              <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
+              <p className="text-lg font-medium">Nenhum relatório gerado ainda</p>
+              <p className="text-sm mb-4">
+                Clique em &quot;Novo Relatório&quot; para começar
+              </p>
+              <Button onClick={() => setIsWizardOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Criar Primeiro Relatório
+              </Button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -361,7 +402,8 @@ export default function ReportsPage() {
                     </div>
                     <div>
                       <p className="font-medium">
-                        {typeLabels[report.type] || report.type} - {report.inventory?.baseYear || currentInventory.baseYear}
+                        {typeLabels[report.type] || report.type} -{" "}
+                        {report.inventory?.baseYear || currentInventory.baseYear}
                       </p>
                       <div className="flex items-center gap-3 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1">
@@ -388,10 +430,18 @@ export default function ReportsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleDownload(report)}
+                      onClick={() => handleViewReport(report)}
+                    >
+                      <Eye className="mr-2 h-4 w-4" />
+                      Visualizar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadJSON(report)}
                     >
                       <Download className="mr-2 h-4 w-4" />
-                      Baixar
+                      JSON
                     </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
