@@ -52,10 +52,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react";
+import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet, Info } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { getStationaryFuelTypes } from "@/lib/calculation-engine/calculators/stationary";
 import { ExcelImportModal } from "@/components/import/excel-import-modal";
+import { CalculationDetailsModal } from "@/components/calculation/calculation-details-modal";
 import Link from "next/link";
 
 const formSchema = z.object({
@@ -71,6 +72,30 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
+interface EmissionResult {
+  co2Equivalent: number;
+  co2Mass?: number;
+  ch4Mass?: number;
+  n2oMass?: number;
+  biogenicCo2?: number;
+  factorsSnapshot?: {
+    emissionFactor?: {
+      name: string;
+      co2: number;
+      ch4: number;
+      n2o: number;
+      energyContent: number;
+      unit: string;
+      density?: number;
+      renewable: boolean;
+      source: string;
+    };
+    energyContent?: number;
+    fossilFraction?: number;
+    renewableFraction?: number;
+  } | null;
+}
+
 interface ActivityDataRow {
   id: string;
   sourceDescription: string;
@@ -79,9 +104,7 @@ interface ActivityDataRow {
   quantityUnit: string;
   month?: number;
   year: number;
-  emissionResults?: {
-    co2Equivalent: number;
-  }[];
+  emissionResults?: EmissionResult[];
 }
 
 const fuelTypes = getStationaryFuelTypes();
@@ -167,6 +190,8 @@ export default function StationaryCombustionPage() {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [selectedCalculation, setSelectedCalculation] = useState<ActivityDataRow | null>(null);
+  const [isCalculationModalOpen, setIsCalculationModalOpen] = useState(false);
 
   const currentYear = new Date().getFullYear();
 
@@ -642,7 +667,7 @@ export default function StationaryCombustionPage() {
                       <TableHead>Combustível</TableHead>
                       <TableHead className="text-right">Quantidade</TableHead>
                       <TableHead className="text-right">tCO₂e</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
+                      <TableHead className="w-[80px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -668,6 +693,18 @@ export default function StationaryCombustionPage() {
                           )}
                         </TableCell>
                         <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setSelectedCalculation(row);
+                                setIsCalculationModalOpen(true);
+                              }}
+                              title="Ver detalhes do cálculo"
+                            >
+                              <Info className="h-4 w-4 text-blue-500" />
+                            </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button
@@ -701,6 +738,7 @@ export default function StationaryCombustionPage() {
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -711,6 +749,25 @@ export default function StationaryCombustionPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Calculation Details Modal */}
+      <CalculationDetailsModal
+        open={isCalculationModalOpen}
+        onOpenChange={setIsCalculationModalOpen}
+        data={selectedCalculation ? {
+          sourceDescription: selectedCalculation.sourceDescription,
+          activityType: selectedCalculation.activityType,
+          quantity: selectedCalculation.quantity,
+          quantityUnit: selectedCalculation.quantityUnit,
+          year: selectedCalculation.year,
+          co2Equivalent: selectedCalculation.emissionResults?.[0]?.co2Equivalent,
+          co2Mass: selectedCalculation.emissionResults?.[0]?.co2Mass,
+          ch4Mass: selectedCalculation.emissionResults?.[0]?.ch4Mass,
+          n2oMass: selectedCalculation.emissionResults?.[0]?.n2oMass,
+          biogenicCo2: selectedCalculation.emissionResults?.[0]?.biogenicCo2,
+          factorsSnapshot: selectedCalculation.emissionResults?.[0]?.factorsSnapshot,
+        } : null}
+      />
     </div>
   );
 }
