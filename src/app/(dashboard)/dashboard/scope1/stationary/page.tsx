@@ -143,13 +143,13 @@ const months = [
 
 // Import fields configuration - labels must match template column names
 const importFields = [
-  { id: "sourceDescription", label: "Descrição da Fonte", required: false, description: "Ex: Caldeira 01, Gerador" },
+  { id: "sourceDescription", label: "Descrição da Fonte", required: false, description: "Ex: Caldeira 01, Gerador (opcional)" },
   { id: "activityType", label: "Combustível", required: true, description: "Gás Natural, GLP, Óleo Diesel, etc." },
   { id: "quantity", label: "Quantidade", required: true, description: "Valor numérico" },
   { id: "quantityUnit", label: "Unidade", required: true, description: "L, m³, kg, t, GJ" },
-  { id: "month", label: "Mês", required: false, description: "1 a 12 (opcional)" },
-  { id: "year", label: "Ano", required: false, description: "Ex: 2024" },
-  { id: "notes", label: "Observações", required: false },
+  { id: "month", label: "Mês", required: false, description: "1 a 12 (opcional - deixe vazio para anual)" },
+  { id: "year", label: "Ano", required: false, description: "Ex: 2024 (usa ano do inventário se vazio)" },
+  { id: "notes", label: "Observações", required: false, description: "Opcional - pode deixar em branco" },
 ];
 
 // Template data for download
@@ -329,43 +329,95 @@ export default function StationaryCombustionPage() {
 
     // Pre-validate and transform data
     const errors: string[] = [];
-    const transformedData = data.map((row, index) => {
+    const validRows: {
+      sourceDescription: string;
+      activityType: string;
+      quantity: number;
+      quantityUnit: string;
+      month: number | undefined;
+      year: number;
+      notes: string | undefined;
+    }[] = [];
+
+    data.forEach((row, index) => {
       const rowNum = index + 2; // Excel row (1-indexed + header)
 
       // Get and validate fuel type using the global findFuelName with aliases
       const rawFuelType = String(row.activityType || "").trim();
-      const matchedFuelType = findFuelName(rawFuelType);
 
-      if (!matchedFuelType && rawFuelType) {
+      // Skip completely empty rows
+      if (!rawFuelType && !row.quantity && !row.quantityUnit) {
+        return; // Skip empty rows silently
+      }
+
+      // Validate fuel type
+      if (!rawFuelType) {
+        errors.push(`Linha ${rowNum}: Combustível não informado`);
+        return;
+      }
+
+      const matchedFuelType = findFuelName(rawFuelType);
+      if (!matchedFuelType) {
         errors.push(`Linha ${rowNum}: Combustível "${rawFuelType}" não reconhecido. Verifique se o nome está correto.`);
+        return;
       }
 
       // Get quantity
       const quantity = Number(row.quantity);
       if (isNaN(quantity) || quantity <= 0) {
         errors.push(`Linha ${rowNum}: Quantidade inválida "${row.quantity}"`);
+        return;
       }
 
       // Get unit
       const unit = String(row.quantityUnit || "").trim();
       if (!unit) {
         errors.push(`Linha ${rowNum}: Unidade não informada`);
+        return;
       }
 
-      return {
-        sourceDescription: String(row.sourceDescription || `Importação linha ${rowNum}`),
-        activityType: matchedFuelType || rawFuelType,
-        quantity: quantity,
+      // Parse month - handle empty, null, undefined
+      let month: number | undefined = undefined;
+      if (row.month !== undefined && row.month !== null && row.month !== "") {
+        const monthNum = Number(row.month);
+        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+          month = monthNum;
+        }
+      }
+
+      // Parse year - handle empty, null, undefined
+      let year = currentYear;
+      if (row.year !== undefined && row.year !== null && row.year !== "") {
+        const yearNum = Number(row.year);
+        if (!isNaN(yearNum) && yearNum >= 2000 && yearNum <= 2100) {
+          year = yearNum;
+        }
+      }
+
+      // Parse notes - can be empty/blank
+      const notes = row.notes !== undefined && row.notes !== null && row.notes !== ""
+        ? String(row.notes).trim()
+        : undefined;
+
+      // Parse source description - can be empty/blank
+      const sourceDescription = row.sourceDescription !== undefined && row.sourceDescription !== null && row.sourceDescription !== ""
+        ? String(row.sourceDescription).trim()
+        : `Importação linha ${rowNum}`;
+
+      validRows.push({
+        sourceDescription,
+        activityType: matchedFuelType,
+        quantity,
         quantityUnit: unit,
-        month: row.month ? Number(row.month) : undefined,
-        year: row.year ? Number(row.year) : currentYear,
-        notes: row.notes ? String(row.notes) : undefined,
-      };
+        month,
+        year,
+        notes,
+      });
     });
 
-    // If there are validation errors, show them but continue with valid rows
-    if (errors.length === data.length) {
-      return { success: 0, errors };
+    // If no valid rows, return errors
+    if (validRows.length === 0) {
+      return { success: 0, errors: errors.length > 0 ? errors : ["Nenhuma linha válida para importar"] };
     }
 
     try {
@@ -377,11 +429,7 @@ export default function StationaryCombustionPage() {
           body: JSON.stringify({
             category: "STATIONARY_COMBUSTION",
             scope: 1,
-            data: transformedData.filter((_, i) => {
-              // Only include rows without pre-validation errors
-              const rowNum = i + 2;
-              return !errors.some(e => e.startsWith(`Linha ${rowNum}:`));
-            }),
+            data: validRows,
           }),
         }
       );

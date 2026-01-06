@@ -30,13 +30,13 @@ const bulkActivityDataSchema = z.object({
   scope: z.number().min(1).max(3),
   data: z.array(
     z.object({
-      sourceDescription: z.string().optional(),
-      activityType: z.string(),
+      sourceDescription: z.string().optional().nullable(),
+      activityType: z.string().min(1),
       quantity: z.number().positive(),
-      quantityUnit: z.string(),
-      month: z.number().min(1).max(12).optional(),
+      quantityUnit: z.string().min(1),
+      month: z.union([z.number().min(1).max(12), z.null(), z.undefined()]).optional(),
       year: z.number().min(2000).max(2100),
-      notes: z.string().optional(),
+      notes: z.string().optional().nullable(),
     })
   ),
 });
@@ -112,11 +112,11 @@ export async function POST(
           activity_type: row.activityType,
           quantity: row.quantity,
           quantity_unit: row.quantityUnit,
-          month: row.month,
+          month: row.month ?? undefined,
           year: row.year || inventory.base_year,
           data_source: "Importação Excel",
           data_quality: "PRIMARY",
-          notes: row.notes,
+          notes: row.notes || undefined,
           created_by: userId,
         });
 
