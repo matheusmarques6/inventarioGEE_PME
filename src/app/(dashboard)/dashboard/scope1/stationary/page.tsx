@@ -140,7 +140,7 @@ const months = [
   { value: 12, label: "Dezembro" },
 ];
 
-// Import fields configuration
+// Import fields configuration - labels must match template column names
 const importFields = [
   { id: "sourceDescription", label: "Descrição da Fonte", required: false, description: "Ex: Caldeira 01, Gerador" },
   { id: "activityType", label: "Combustível", required: true, description: "Gás Natural, GLP, Óleo Diesel, etc." },
@@ -326,6 +326,60 @@ export default function StationaryCombustionPage() {
       return { success: 0, errors: ["Nenhum inventário selecionado"] };
     }
 
+    // Helper to find matching fuel type (case-insensitive)
+    const findFuelType = (input: string): string | null => {
+      const inputLower = input.toLowerCase().trim();
+      // Exact match first
+      const exactMatch = fuelTypes.find(f => f.toLowerCase() === inputLower);
+      if (exactMatch) return exactMatch;
+      // Partial match
+      const partialMatch = fuelTypes.find(f =>
+        f.toLowerCase().includes(inputLower) || inputLower.includes(f.toLowerCase())
+      );
+      return partialMatch || null;
+    };
+
+    // Pre-validate and transform data
+    const errors: string[] = [];
+    const transformedData = data.map((row, index) => {
+      const rowNum = index + 2; // Excel row (1-indexed + header)
+
+      // Get and validate fuel type
+      const rawFuelType = String(row.activityType || "").trim();
+      const matchedFuelType = findFuelType(rawFuelType);
+
+      if (!matchedFuelType && rawFuelType) {
+        errors.push(`Linha ${rowNum}: Combustível "${rawFuelType}" não reconhecido. Use: ${fuelTypes.slice(0, 5).join(", ")}...`);
+      }
+
+      // Get quantity
+      const quantity = Number(row.quantity);
+      if (isNaN(quantity) || quantity <= 0) {
+        errors.push(`Linha ${rowNum}: Quantidade inválida "${row.quantity}"`);
+      }
+
+      // Get unit
+      const unit = String(row.quantityUnit || "").trim();
+      if (!unit) {
+        errors.push(`Linha ${rowNum}: Unidade não informada`);
+      }
+
+      return {
+        sourceDescription: String(row.sourceDescription || `Importação linha ${rowNum}`),
+        activityType: matchedFuelType || rawFuelType,
+        quantity: quantity,
+        quantityUnit: unit,
+        month: row.month ? Number(row.month) : undefined,
+        year: row.year ? Number(row.year) : currentYear,
+        notes: row.notes ? String(row.notes) : undefined,
+      };
+    });
+
+    // If there are validation errors, show them but continue with valid rows
+    if (errors.length === data.length) {
+      return { success: 0, errors };
+    }
+
     try {
       const response = await fetch(
         `/api/inventories/${currentInventory.id}/activity-data/bulk`,
@@ -335,22 +389,21 @@ export default function StationaryCombustionPage() {
           body: JSON.stringify({
             category: "STATIONARY_COMBUSTION",
             scope: 1,
-            data: data.map((row) => ({
-              sourceDescription: String(row.sourceDescription || ""),
-              activityType: String(row.activityType || ""),
-              quantity: Number(row.quantity) || 0,
-              quantityUnit: String(row.quantityUnit || ""),
-              month: row.month ? Number(row.month) : undefined,
-              year: row.year ? Number(row.year) : currentYear,
-              notes: row.notes ? String(row.notes) : undefined,
-            })),
+            data: transformedData.filter((_, i) => {
+              // Only include rows without pre-validation errors
+              const rowNum = i + 2;
+              return !errors.some(e => e.startsWith(`Linha ${rowNum}:`));
+            }),
           }),
         }
       );
 
       const result = await response.json();
 
-      if (response.ok) {
+      // Merge pre-validation errors with API errors
+      const allErrors = [...errors, ...(result.errors || [])];
+
+      if (response.ok && result.success > 0) {
         fetchActivityData();
         toast({
           title: "Importação concluída",
@@ -358,12 +411,15 @@ export default function StationaryCombustionPage() {
         });
       }
 
-      return result;
+      return {
+        success: result.success || 0,
+        errors: allErrors,
+      };
     } catch (error) {
       console.error("Import error:", error);
       return {
         success: 0,
-        errors: [error instanceof Error ? error.message : "Erro na importação"],
+        errors: [...errors, error instanceof Error ? error.message : "Erro na importação"],
       };
     }
   }

@@ -136,12 +136,27 @@ export function ExcelImportModal({
       // Try to auto-map columns based on similar names
       const autoMapping: Record<string, string> = {};
       fields.forEach((field) => {
-        const matchingColumn = columns.find(
-          (col) =>
-            col.toLowerCase().includes(field.label.toLowerCase()) ||
-            field.label.toLowerCase().includes(col.toLowerCase()) ||
-            col.toLowerCase() === field.id.toLowerCase()
-        );
+        // Normalize strings for comparison (remove accents, lowercase)
+        const normalizeStr = (str: string) =>
+          str.toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]/g, "");
+
+        const fieldLabelNorm = normalizeStr(field.label);
+        const fieldIdNorm = normalizeStr(field.id);
+
+        const matchingColumn = columns.find((col) => {
+          const colNorm = normalizeStr(col);
+          return (
+            colNorm === fieldLabelNorm ||
+            colNorm === fieldIdNorm ||
+            colNorm.includes(fieldLabelNorm) ||
+            fieldLabelNorm.includes(colNorm) ||
+            // Also check without spaces
+            colNorm.replace(/\s/g, "") === fieldLabelNorm.replace(/\s/g, "")
+          );
+        });
         if (matchingColumn) {
           autoMapping[field.id] = matchingColumn;
         }
@@ -354,11 +369,11 @@ export function ExcelImportModal({
                       </TableCell>
                       <TableCell>
                         <Select
-                          value={columnMapping[field.id] || ""}
+                          value={columnMapping[field.id] || "__none__"}
                           onValueChange={(value) =>
                             setColumnMapping((prev) => ({
                               ...prev,
-                              [field.id]: value,
+                              [field.id]: value === "__none__" ? "" : value,
                             }))
                           }
                         >
@@ -366,7 +381,7 @@ export function ExcelImportModal({
                             <SelectValue placeholder="Selecione..." />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Não mapear</SelectItem>
+                            <SelectItem value="__none__">Não mapear</SelectItem>
                             {excelColumns.map((col) => (
                               <SelectItem key={col} value={col}>
                                 {col}
