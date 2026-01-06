@@ -52,9 +52,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, Factory, Trash2, AlertCircle, Loader2 } from "lucide-react";
+import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { getStationaryFuelTypes } from "@/lib/calculation-engine/calculators/stationary";
+import { ExcelImportModal } from "@/components/import/excel-import-modal";
 import Link from "next/link";
 
 const formSchema = z.object({
@@ -116,6 +117,48 @@ const months = [
   { value: 12, label: "Dezembro" },
 ];
 
+// Import fields configuration
+const importFields = [
+  { id: "sourceDescription", label: "Descrição da Fonte", required: false, description: "Ex: Caldeira 01, Gerador" },
+  { id: "activityType", label: "Combustível", required: true, description: "Gás Natural, GLP, Óleo Diesel, etc." },
+  { id: "quantity", label: "Quantidade", required: true, description: "Valor numérico" },
+  { id: "quantityUnit", label: "Unidade", required: true, description: "L, m³, kg, t, GJ" },
+  { id: "month", label: "Mês", required: false, description: "1 a 12 (opcional)" },
+  { id: "year", label: "Ano", required: false, description: "Ex: 2024" },
+  { id: "notes", label: "Observações", required: false },
+];
+
+// Template data for download
+const templateData = [
+  {
+    "Descrição da Fonte": "Caldeira Industrial 01",
+    "Combustível": "Gás Natural",
+    "Quantidade": 1000,
+    "Unidade": "m³",
+    "Mês": 1,
+    "Ano": 2024,
+    "Observações": "Consumo mensal",
+  },
+  {
+    "Descrição da Fonte": "Gerador de Emergência",
+    "Combustível": "Óleo Diesel",
+    "Quantidade": 500,
+    "Unidade": "L",
+    "Mês": 1,
+    "Ano": 2024,
+    "Observações": "",
+  },
+  {
+    "Descrição da Fonte": "Forno Industrial",
+    "Combustível": "GLP",
+    "Quantidade": 200,
+    "Unidade": "kg",
+    "Mês": 1,
+    "Ano": 2024,
+    "Observações": "",
+  },
+];
+
 export default function StationaryCombustionPage() {
   const { currentInventory, isLoading: inventoryLoading } = useInventory();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -123,6 +166,7 @@ export default function StationaryCombustionPage() {
   const [activityData, setActivityData] = useState<ActivityDataRow[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const currentYear = new Date().getFullYear();
 
@@ -252,6 +296,53 @@ export default function StationaryCombustionPage() {
     }
   }
 
+  async function handleImport(data: Record<string, unknown>[]): Promise<{ success: number; errors: string[] }> {
+    if (!currentInventory) {
+      return { success: 0, errors: ["Nenhum inventário selecionado"] };
+    }
+
+    try {
+      const response = await fetch(
+        `/api/inventories/${currentInventory.id}/activity-data/bulk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category: "STATIONARY_COMBUSTION",
+            scope: 1,
+            data: data.map((row) => ({
+              sourceDescription: String(row.sourceDescription || ""),
+              activityType: String(row.activityType || ""),
+              quantity: Number(row.quantity) || 0,
+              quantityUnit: String(row.quantityUnit || ""),
+              month: row.month ? Number(row.month) : undefined,
+              year: row.year ? Number(row.year) : currentYear,
+              notes: row.notes ? String(row.notes) : undefined,
+            })),
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (response.ok) {
+        fetchActivityData();
+        toast({
+          title: "Importação concluída",
+          description: `${result.success} registro(s) importado(s) com sucesso.`,
+        });
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Import error:", error);
+      return {
+        success: 0,
+        errors: [error instanceof Error ? error.message : "Erro na importação"],
+      };
+    }
+  }
+
   if (inventoryLoading) {
     return (
       <div className="space-y-6">
@@ -289,17 +380,38 @@ export default function StationaryCombustionPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center gap-4">
-        <div className="p-3 rounded-xl bg-red-100">
-          <Factory className="h-6 w-6 text-red-600" />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-red-100">
+            <Factory className="h-6 w-6 text-red-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Combustão Estacionária</h1>
+            <p className="text-muted-foreground">
+              Escopo 1 - Caldeiras, geradores, fornos industriais
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Combustão Estacionária</h1>
-          <p className="text-muted-foreground">
-            Escopo 1 - Caldeiras, geradores, fornos industriais
-          </p>
-        </div>
+        <Button
+          variant="outline"
+          onClick={() => setIsImportModalOpen(true)}
+        >
+          <FileSpreadsheet className="mr-2 h-4 w-4" />
+          Importar Planilha
+        </Button>
       </div>
+
+      {/* Import Modal */}
+      <ExcelImportModal
+        open={isImportModalOpen}
+        onOpenChange={setIsImportModalOpen}
+        title="Importar Dados de Combustão Estacionária"
+        description="Importe dados de consumo de combustíveis a partir de uma planilha Excel"
+        fields={importFields}
+        templateData={templateData}
+        templateFileName="modelo_combustao_estacionaria.xlsx"
+        onImport={handleImport}
+      />
 
       {/* Summary Card */}
       {activityData.length > 0 && (
