@@ -55,6 +55,7 @@ import {
 import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet, Info } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { getStationaryFuelTypes } from "@/lib/calculation-engine/calculators/stationary";
+import { findFuelName } from "@/lib/constants/emission-factors";
 import { ExcelImportModal } from "@/components/import/excel-import-modal";
 import { CalculationDetailsModal } from "@/components/calculation/calculation-details-modal";
 import Link from "next/link";
@@ -326,30 +327,17 @@ export default function StationaryCombustionPage() {
       return { success: 0, errors: ["Nenhum inventário selecionado"] };
     }
 
-    // Helper to find matching fuel type (case-insensitive)
-    const findFuelType = (input: string): string | null => {
-      const inputLower = input.toLowerCase().trim();
-      // Exact match first
-      const exactMatch = fuelTypes.find(f => f.toLowerCase() === inputLower);
-      if (exactMatch) return exactMatch;
-      // Partial match
-      const partialMatch = fuelTypes.find(f =>
-        f.toLowerCase().includes(inputLower) || inputLower.includes(f.toLowerCase())
-      );
-      return partialMatch || null;
-    };
-
     // Pre-validate and transform data
     const errors: string[] = [];
     const transformedData = data.map((row, index) => {
       const rowNum = index + 2; // Excel row (1-indexed + header)
 
-      // Get and validate fuel type
+      // Get and validate fuel type using the global findFuelName with aliases
       const rawFuelType = String(row.activityType || "").trim();
-      const matchedFuelType = findFuelType(rawFuelType);
+      const matchedFuelType = findFuelName(rawFuelType);
 
       if (!matchedFuelType && rawFuelType) {
-        errors.push(`Linha ${rowNum}: Combustível "${rawFuelType}" não reconhecido. Use: ${fuelTypes.slice(0, 5).join(", ")}...`);
+        errors.push(`Linha ${rowNum}: Combustível "${rawFuelType}" não reconhecido. Verifique se o nome está correto.`);
       }
 
       // Get quantity
