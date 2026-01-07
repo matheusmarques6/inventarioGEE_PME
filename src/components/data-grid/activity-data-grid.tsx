@@ -321,10 +321,11 @@ export function ActivityDataGrid({
     }
 
     if (column.type === "select") {
+      const stringValue = value ? String(value) : undefined;
       return (
         <Select
-          value={String(value ?? "")}
-          onValueChange={(v) => handleCellChange(row.id, column.id, v)}
+          value={stringValue}
+          onValueChange={(v) => handleCellChange(row.id, column.id, v === "__clear__" ? "" : v)}
         >
           <SelectTrigger className={cn(
             "h-8 border-0 bg-transparent hover:bg-muted/50 focus:ring-1",
@@ -344,10 +345,11 @@ export function ActivityDataGrid({
     }
 
     if (column.type === "month") {
+      const monthValue = value ? String(value) : undefined;
       return (
         <Select
-          value={value ? String(value) : ""}
-          onValueChange={(v) => handleCellChange(row.id, column.id, v ? parseInt(v) : undefined)}
+          value={monthValue}
+          onValueChange={(v) => handleCellChange(row.id, column.id, v === "__anual__" ? undefined : parseInt(v))}
         >
           <SelectTrigger className={cn(
             "h-8 border-0 bg-transparent hover:bg-muted/50 focus:ring-1",
@@ -356,7 +358,7 @@ export function ActivityDataGrid({
             <SelectValue placeholder="Anual" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Anual</SelectItem>
+            <SelectItem value="__anual__">Anual</SelectItem>
             {months.map(m => (
               <SelectItem key={m.value} value={m.value}>
                 {m.label}
