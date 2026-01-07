@@ -590,16 +590,135 @@ export const db = {
     },
   },
 
-  // Operational Units
+  // Operational Units - Full CRUD
   operationalUnits: {
-    async findByOrganization(organizationId: string) {
-      const { data, error } = await getDb()
+    async findByOrganization(organizationId: string, includeInactive = false) {
+      let query = getDb()
         .from("operational_units")
         .select("*")
         .eq("organization_id", organizationId)
-        .eq("is_active", true);
+        .order("name", { ascending: true });
+
+      if (!includeInactive) {
+        query = query.eq("is_active", true);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as OperationalUnit[];
+    },
+
+    async findById(id: string) {
+      const { data, error } = await getDb()
+        .from("operational_units")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) throw error;
+      return data as OperationalUnit;
+    },
+
+    async findByIdWithOrg(id: string, organizationId: string) {
+      const { data, error } = await getDb()
+        .from("operational_units")
+        .select("*")
+        .eq("id", id)
+        .eq("organization_id", organizationId)
+        .single();
+      if (error) return null;
+      return data as OperationalUnit;
+    },
+
+    async create(unit: Partial<OperationalUnit>) {
+      const { data, error } = await getDb()
+        .from("operational_units")
+        .insert(unit)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as OperationalUnit;
+    },
+
+    async update(id: string, updates: Partial<OperationalUnit>) {
+      const { data, error } = await getDb()
+        .from("operational_units")
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as OperationalUnit;
+    },
+
+    async delete(id: string) {
+      // Soft delete by setting is_active = false
+      const { error } = await getDb()
+        .from("operational_units")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+      return true;
+    },
+
+    async hardDelete(id: string) {
+      const { error } = await getDb()
+        .from("operational_units")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      return true;
+    },
+
+    async getEmissionsStats(organizationId: string, inventoryId: string) {
+      // Get emissions grouped by unit
+      const { data: emissions, error } = await getDb()
+        .from("emission_results")
+        .select(`
+          unit_id,
+          co2_equivalent,
+          scope,
+          category,
+          activity_data!inner(unit_id, inventory_id)
+        `)
+        .eq("inventory_id", inventoryId);
+
+      if (error) throw error;
+
+      // Get all units
+      const units = await this.findByOrganization(organizationId);
+
+      // Aggregate emissions by unit
+      const unitStats = new Map<string, { scope1: number; scope2: number; scope3: number; total: number }>();
+
+      for (const emission of emissions || []) {
+        const unitId = (emission.activity_data as { unit_id?: string })?.unit_id || "unassigned";
+        if (!unitStats.has(unitId)) {
+          unitStats.set(unitId, { scope1: 0, scope2: 0, scope3: 0, total: 0 });
+        }
+        const stats = unitStats.get(unitId)!;
+        const value = Number(emission.co2_equivalent) || 0;
+        stats.total += value;
+        if (emission.scope === 1) stats.scope1 += value;
+        else if (emission.scope === 2) stats.scope2 += value;
+        else if (emission.scope === 3) stats.scope3 += value;
+      }
+
+      return {
+        units: units.map(unit => ({
+          ...unit,
+          emissions: unitStats.get(unit.id) || { scope1: 0, scope2: 0, scope3: 0, total: 0 },
+        })),
+        unassigned: unitStats.get("unassigned") || { scope1: 0, scope2: 0, scope3: 0, total: 0 },
+      };
+    },
+
+    async countActivityData(unitId: string) {
+      const { count, error } = await getDb()
+        .from("activity_data")
+        .select("*", { count: "exact", head: true })
+        .eq("unit_id", unitId);
+      if (error) return 0;
+      return count || 0;
     },
   },
 
