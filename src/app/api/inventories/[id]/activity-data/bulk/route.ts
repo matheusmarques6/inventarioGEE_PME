@@ -30,6 +30,7 @@ const bulkActivityDataSchema = z.object({
   scope: z.number().min(1).max(3),
   data: z.array(
     z.object({
+      id: z.string().optional(), // For updates
       sourceDescription: z.string().optional().nullable(),
       activityType: z.string().min(1),
       quantity: z.number().positive(),
@@ -37,11 +38,16 @@ const bulkActivityDataSchema = z.object({
       month: z.union([z.number().min(1).max(12), z.null(), z.undefined()]).optional(),
       year: z.number().min(2000).max(2100),
       notes: z.string().optional().nullable(),
+      unitId: z.string().optional().nullable(),
     })
   ),
 });
 
-// POST /api/inventories/[id]/activity-data/bulk - Bulk import activity data
+const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().min(1)),
+});
+
+// POST /api/inventories/[id]/activity-data/bulk - Bulk create/update activity data
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -78,15 +84,18 @@ export async function POST(
       );
     }
 
-    const results: { success: number; errors: string[] } = {
+    const results: { success: number; errors: string[]; created: number; updated: number } = {
       success: 0,
       errors: [],
+      created: 0,
+      updated: 0,
     };
 
     // Process each row
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      const rowNum = i + 2; // Excel row (1-indexed + header)
+      const rowNum = i + 1;
+      const isUpdate = row.id && !row.id.startsWith("new-");
 
       try {
         // Validate required fields
@@ -103,22 +112,46 @@ export async function POST(
           continue;
         }
 
-        // Create activity data
-        const activityData = await db.activityData.create({
-          inventory_id: inventoryId,
-          category,
-          scope,
-          source_description: row.sourceDescription || `Importação linha ${rowNum}`,
-          activity_type: row.activityType,
-          quantity: row.quantity,
-          quantity_unit: row.quantityUnit,
-          month: row.month ?? undefined,
-          year: row.year || inventory.base_year,
-          data_source: "Importação Excel",
-          data_quality: "PRIMARY",
-          notes: row.notes || undefined,
-          created_by: userId,
-        });
+        let activityData;
+
+        if (isUpdate) {
+          // Update existing record
+          activityData = await db.activityData.update(row.id!, {
+            source_description: row.sourceDescription || undefined,
+            activity_type: row.activityType,
+            quantity: row.quantity,
+            quantity_unit: row.quantityUnit,
+            month: row.month ?? undefined,
+            year: row.year,
+            notes: row.notes || undefined,
+            unit_id: row.unitId || undefined,
+          });
+
+          // Delete old emission result
+          await db.emissionResults.deleteByActivityId(row.id!);
+
+          results.updated++;
+        } else {
+          // Create new record
+          activityData = await db.activityData.create({
+            inventory_id: inventoryId,
+            category,
+            scope,
+            source_description: row.sourceDescription || `Registro ${rowNum}`,
+            activity_type: row.activityType,
+            quantity: row.quantity,
+            quantity_unit: row.quantityUnit,
+            month: row.month ?? undefined,
+            year: row.year || inventory.base_year,
+            data_source: "Manual",
+            data_quality: "PRIMARY",
+            notes: row.notes || undefined,
+            unit_id: row.unitId || undefined,
+            created_by: userId,
+          });
+
+          results.created++;
+        }
 
         // Calculate emissions
         const calculationInput = {
@@ -171,7 +204,7 @@ export async function POST(
     // Log the bulk action
     await db.auditLogs.create({
       inventory_id: inventoryId,
-      action: "BULK_IMPORT",
+      action: "BULK_SAVE",
       entity_type: "ActivityData",
       entity_id: inventoryId,
       user_id: userId!,
@@ -180,7 +213,8 @@ export async function POST(
         category,
         scope,
         totalRows: data.length,
-        successCount: results.success,
+        created: results.created,
+        updated: results.updated,
         errorCount: results.errors.length,
       },
     });
@@ -189,7 +223,90 @@ export async function POST(
       status: results.success > 0 ? 201 : 400,
     });
   } catch (error) {
-    console.error("Error in bulk import:", error);
+    console.error("Error in bulk save:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/inventories/[id]/activity-data/bulk - Bulk delete activity data
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { userId, dbUser, error } = await requireAuth();
+    if (error || !dbUser) {
+      return NextResponse.json(
+        { error: error || "User not found" },
+        { status: error ? 401 : 404 }
+      );
+    }
+
+    const { id: inventoryId } = await params;
+    const body = await request.json();
+
+    // Validate input
+    const validation = bulkDeleteSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: "Invalid data", details: validation.error.errors },
+        { status: 400 }
+      );
+    }
+
+    const { ids } = validation.data;
+
+    // Verify access to inventory
+    const inventory = await db.inventories.findByIdWithOrg(inventoryId, dbUser.organization_id);
+    if (!inventory) {
+      return NextResponse.json(
+        { error: "Inventory not found" },
+        { status: 404 }
+      );
+    }
+
+    const results: { success: number; errors: string[] } = {
+      success: 0,
+      errors: [],
+    };
+
+    // Delete each record
+    for (const id of ids) {
+      try {
+        // Delete emission results first
+        await db.emissionResults.deleteByActivityId(id);
+        // Delete activity data
+        await db.activityData.delete(id);
+        results.success++;
+      } catch (deleteError) {
+        console.error(`Error deleting ${id}:`, deleteError);
+        results.errors.push(
+          `ID ${id}: ${deleteError instanceof Error ? deleteError.message : "Erro desconhecido"}`
+        );
+      }
+    }
+
+    // Log the bulk delete action
+    await db.auditLogs.create({
+      inventory_id: inventoryId,
+      action: "BULK_DELETE",
+      entity_type: "ActivityData",
+      entity_id: inventoryId,
+      user_id: userId!,
+      user_email: dbUser.email,
+      previous_value: {
+        deletedIds: ids,
+        successCount: results.success,
+        errorCount: results.errors.length,
+      },
+    });
+
+    return NextResponse.json(results);
+  } catch (error) {
+    console.error("Error in bulk delete:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

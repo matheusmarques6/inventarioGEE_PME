@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Truck, Trash2, Loader2, AlertCircle, Building2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useInventory } from "@/contexts/inventory-context";
 import {
   Card,
   CardContent,
@@ -10,56 +9,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { useInventory } from "@/contexts/inventory-context";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Truck, AlertCircle, Info } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
+import { ActivityDataGrid, ColumnDef, DataRow } from "@/components/data-grid/activity-data-grid";
 import Link from "next/link";
 
-interface OperationalUnit {
-  id: string;
-  name: string;
-  type: string;
-  state?: string;
-  city?: string;
-  is_active?: boolean;
-}
-
-const fuelTypes = [
-  { value: "Gasolina Automotiva", label: "Gasolina Comum" },
-  { value: "Óleo Diesel", label: "Diesel S10" },
+// Fuel options for mobile combustion
+const fuelOptions = [
+  { value: "Gasolina Automotiva", label: "Gasolina" },
+  { value: "Óleo Diesel", label: "Diesel" },
   { value: "Álcool Etílico Hidratado", label: "Etanol" },
   { value: "GLP", label: "GLP" },
   { value: "Biodiesel", label: "Biodiesel" },
+  { value: "Gás Natural Veicular", label: "GNV" },
 ];
 
-const vehicleTypes = [
+// Vehicle type options
+const vehicleOptions = [
   { value: "Automóvel", label: "Automóvel" },
   { value: "Caminhão Leve", label: "Caminhão Leve" },
   { value: "Caminhão Pesado", label: "Caminhão Pesado" },
@@ -69,196 +37,243 @@ const vehicleTypes = [
   { value: "Máquina Agrícola", label: "Máquina Agrícola" },
 ];
 
-interface ActivityRecord {
-  id: string;
-  sourceDescription: string;
-  quantity: number;
-  quantityUnit: string;
-  month?: number;
-  year: number;
-  metadata?: {
-    fuelName?: string;
-    vehicleCategory?: string;
-  };
-  emissionResults?: Array<{
-    co2Equivalent: number;
-  }>;
-}
+// Unit options
+const unitOptions = [
+  { value: "litros", label: "Litros" },
+  { value: "m3", label: "m³" },
+  { value: "kg", label: "kg" },
+];
+
+// Column definitions
+const columns: ColumnDef[] = [
+  {
+    id: "sourceDescription",
+    header: "Veículo/Frota",
+    type: "select",
+    options: vehicleOptions,
+    width: "140px",
+    required: true,
+  },
+  {
+    id: "activityType",
+    header: "Combustível",
+    type: "select",
+    options: fuelOptions,
+    width: "120px",
+    required: true,
+  },
+  {
+    id: "quantity",
+    header: "Quantidade",
+    type: "number",
+    width: "100px",
+    required: true,
+    placeholder: "0",
+  },
+  {
+    id: "quantityUnit",
+    header: "Unidade",
+    type: "select",
+    options: unitOptions,
+    width: "90px",
+    required: true,
+  },
+  {
+    id: "month",
+    header: "Mês",
+    type: "month",
+    width: "100px",
+  },
+  {
+    id: "year",
+    header: "Ano",
+    type: "number",
+    width: "80px",
+    required: true,
+  },
+  {
+    id: "notes",
+    header: "Observações",
+    type: "text",
+    width: "150px",
+    placeholder: "Opcional",
+  },
+  {
+    id: "emissions",
+    header: "tCO₂e",
+    type: "readonly",
+    width: "90px",
+    format: (value) => {
+      const num = Number(value) || 0;
+      return num.toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    },
+  },
+];
 
 export default function MobileCombustionPage() {
   const { currentInventory, isLoading: inventoryLoading } = useInventory();
-  const [records, setRecords] = useState<ActivityRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [operationalUnits, setOperationalUnits] = useState<OperationalUnit[]>([]);
-  const [isLoadingUnits, setIsLoadingUnits] = useState(false);
+  const [activityData, setActivityData] = useState<DataRow[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
 
-  // Form state
-  const [unitId, setUnitId] = useState("");
-  const [vehicleType, setVehicleType] = useState("");
-  const [fuelType, setFuelType] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [monthYear, setMonthYear] = useState("");
+  const currentYear = new Date().getFullYear();
 
-  const fetchRecords = useCallback(async () => {
-    if (!currentInventory?.id) return;
+  const fetchActivityData = useCallback(async () => {
+    if (!currentInventory) return;
 
-    setIsLoading(true);
     try {
+      setIsLoadingData(true);
       const response = await fetch(
         `/api/scope1/mobile?inventoryId=${currentInventory.id}`
       );
+
       if (response.ok) {
         const data = await response.json();
-        setRecords(data);
+        // Transform API data to grid format
+        const gridData: DataRow[] = (data || []).map((row: Record<string, unknown>) => {
+          const metadata = row.metadata as { fuelName?: string; vehicleCategory?: string } | undefined;
+          return {
+            id: row.id as string,
+            sourceDescription: row.sourceDescription || metadata?.vehicleCategory || "",
+            activityType: metadata?.fuelName || "",
+            quantity: Number(row.quantity) || 0,
+            quantityUnit: row.quantityUnit || "litros",
+            month: row.month || undefined,
+            year: Number(row.year) || currentYear,
+            notes: row.notes || "",
+            emissions: (row.emissionResults as Array<{ co2Equivalent: number }>)?.[0]?.co2Equivalent || 0,
+          };
+        });
+        setActivityData(gridData);
       }
     } catch (error) {
-      console.error("Error fetching records:", error);
+      console.error("Error fetching activity data:", error);
     } finally {
-      setIsLoading(false);
+      setIsLoadingData(false);
     }
-  }, [currentInventory?.id]);
-
-  const fetchUnits = useCallback(async () => {
-    try {
-      setIsLoadingUnits(true);
-      const response = await fetch("/api/units");
-      if (response.ok) {
-        const data = await response.json();
-        setOperationalUnits(data.filter((u: OperationalUnit) => u.is_active !== false));
-      }
-    } catch (error) {
-      console.error("Error fetching units:", error);
-    } finally {
-      setIsLoadingUnits(false);
-    }
-  }, []);
+  }, [currentInventory, currentYear]);
 
   useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    fetchActivityData();
+  }, [fetchActivityData]);
 
-  useEffect(() => {
-    fetchUnits();
-  }, [fetchUnits]);
-
-  const handleSubmit = async () => {
-    if (!currentInventory?.id) {
-      toast({
-        title: "Erro",
-        description: "Selecione um inventário primeiro",
-        variant: "destructive",
-      });
-      return;
+  const handleSave = async (rows: DataRow[]): Promise<{ success: boolean; errors?: string[] }> => {
+    if (!currentInventory) {
+      return { success: false, errors: ["Nenhum inventário selecionado"] };
     }
 
-    if (!vehicleType || !fuelType || !quantity) {
-      toast({
-        title: "Erro",
-        description: "Preencha todos os campos obrigatórios",
-        variant: "destructive",
-      });
-      return;
-    }
+    const errors: string[] = [];
+    let successCount = 0;
 
-    setIsSubmitting(true);
-    try {
-      const [year, month] = monthYear ? monthYear.split("-").map(Number) : [new Date().getFullYear(), undefined];
+    // Process each row individually through the mobile API
+    for (const row of rows) {
+      const isNew = String(row.id).startsWith("new-");
 
-      const response = await fetch("/api/scope1/mobile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          inventoryId: currentInventory.id,
-          unitId: unitId || undefined,
-          sourceDescription: vehicleType,
-          fuelName: fuelType,
-          quantity: parseFloat(quantity),
-          unit: "litros",
-          vehicleCategory: vehicleType,
-          vehicleType: vehicleType.toLowerCase().includes("máquina") || vehicleType.toLowerCase().includes("agrícola") ? "offroad" : "road",
-          year: year || new Date().getFullYear(),
-          month: month,
-          dataSource: "Manual",
-        }),
-      });
+      try {
+        if (isNew) {
+          // Create new record via mobile API
+          const vehicleType = String(row.sourceDescription || "").toLowerCase().includes("máquina") ||
+                             String(row.sourceDescription || "").toLowerCase().includes("agrícola")
+                             ? "offroad" : "road";
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Erro ao salvar");
+          const response = await fetch("/api/scope1/mobile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inventoryId: currentInventory.id,
+              sourceDescription: row.sourceDescription || "Veículo",
+              fuelName: row.activityType,
+              quantity: Number(row.quantity),
+              unit: row.quantityUnit || "litros",
+              vehicleCategory: row.sourceDescription,
+              vehicleType,
+              year: Number(row.year) || currentYear,
+              month: row.month ? Number(row.month) : undefined,
+              dataSource: "Manual",
+              notes: row.notes || undefined,
+            }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            errors.push(`Erro ao criar: ${error.error || "Erro desconhecido"}`);
+          } else {
+            successCount++;
+          }
+        } else {
+          // Update existing record via bulk API
+          const response = await fetch(
+            `/api/inventories/${currentInventory.id}/activity-data/bulk`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                category: "MOBILE_COMBUSTION",
+                scope: 1,
+                data: [{
+                  id: row.id,
+                  sourceDescription: row.sourceDescription || undefined,
+                  activityType: row.activityType,
+                  quantity: Number(row.quantity),
+                  quantityUnit: row.quantityUnit || "litros",
+                  month: row.month ? Number(row.month) : undefined,
+                  year: Number(row.year) || currentYear,
+                  notes: row.notes || undefined,
+                }],
+              }),
+            }
+          );
+
+          const result = await response.json();
+          if (result.success > 0) {
+            successCount++;
+          } else if (result.errors?.length > 0) {
+            errors.push(...result.errors);
+          }
+        }
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "Erro ao salvar");
       }
+    }
+
+    if (successCount > 0) {
+      return { success: true };
+    } else {
+      return { success: false, errors: errors.length > 0 ? errors : ["Erro ao salvar dados"] };
+    }
+  };
+
+  const handleDelete = async (ids: string[]): Promise<{ success: boolean; errors?: string[] }> => {
+    if (!currentInventory) {
+      return { success: false, errors: ["Nenhum inventário selecionado"] };
+    }
+
+    try {
+      const response = await fetch(
+        `/api/inventories/${currentInventory.id}/activity-data/bulk`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        }
+      );
 
       const result = await response.json();
 
-      toast({
-        title: "Registro adicionado",
-        description: `Emissões calculadas: ${result.calculatedEmissions?.totalTCO2e?.toFixed(4) || 0} tCO₂e`,
-      });
-
-      // Reset form
-      setUnitId("");
-      setVehicleType("");
-      setFuelType("");
-      setQuantity("");
-      setMonthYear("");
-
-      // Refresh records
-      fetchRecords();
-    } catch (error) {
-      toast({
-        title: "Erro ao salvar",
-        description: error instanceof Error ? error.message : "Tente novamente",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!currentInventory?.id) return;
-
-    setDeletingId(id);
-    try {
-      const response = await fetch(
-        `/api/inventories/${currentInventory.id}/activity-data/${id}`,
-        { method: "DELETE" }
-      );
-
-      if (response.ok) {
-        toast({ title: "Registro excluído" });
-        fetchRecords();
+      if (response.ok && result.success > 0) {
+        return { success: true };
       } else {
-        throw new Error("Erro ao excluir");
+        return { success: false, errors: result.errors || ["Erro ao excluir dados"] };
       }
     } catch (error) {
-      toast({
-        title: "Erro ao excluir",
-        description: "Tente novamente",
-        variant: "destructive",
-      });
-    } finally {
-      setDeletingId(null);
+      return { success: false, errors: [error instanceof Error ? error.message : "Erro ao excluir"] };
     }
   };
-
-  const getMonthName = (month?: number) => {
-    if (!month) return "Anual";
-    const months = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-    return months[month];
-  };
-
-  const totalEmissions = records.reduce(
-    (sum, r) => sum + (r.emissionResults?.[0]?.co2Equivalent || 0),
-    0
-  );
 
   if (inventoryLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <Skeleton className="h-12 w-64" />
+        <Skeleton className="h-[400px]" />
       </div>
     );
   }
@@ -280,223 +295,77 @@ export default function MobileCombustionPage() {
     );
   }
 
+  const totalEmissions = activityData.reduce(
+    (sum, row) => sum + Number(row.emissions || 0),
+    0
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <div className="p-3 rounded-xl bg-orange-100">
+          <Truck className="h-6 w-6 text-orange-600" />
+        </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Truck className="h-6 w-6 text-orange-500" />
-            Combustão Móvel
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">Combustão Móvel</h1>
           <p className="text-muted-foreground">
-            Frota de veículos próprios e arrendados - {currentInventory.name}
+            Escopo 1 - Frota de veículos próprios e arrendados
           </p>
         </div>
-        {records.length > 0 && (
-          <div className="text-right">
-            <p className="text-sm text-muted-foreground">Total de Emissões</p>
-            <p className="text-2xl font-bold">{totalEmissions.toFixed(2)} <span className="text-sm font-normal">tCO₂e</span></p>
-          </div>
-        )}
       </div>
 
-      {/* Form Card */}
+      {/* Summary */}
+      {activityData.length > 0 && (
+        <Card className="bg-gradient-to-r from-orange-50 to-amber-50 border-orange-200">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total de emissões</p>
+                <p className="text-2xl font-bold tabular-nums">
+                  {totalEmissions.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                  <span className="text-sm font-normal text-muted-foreground ml-1">tCO₂e</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">Registros</p>
+                <p className="text-2xl font-bold tabular-nums">{activityData.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Data Grid */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5" />
-            Adicionar Consumo
+            Dados de Consumo
+            <Info className="h-4 w-4 text-muted-foreground" />
           </CardTitle>
           <CardDescription>
-            Registre o consumo de combustível da frota
+            Adicione, edite ou exclua registros de consumo de combustível da frota.
+            Clique em uma célula para editar. Use os checkboxes para seleção em massa.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Unit Selector */}
-          <div className="mb-4">
-            <Label className="flex items-center gap-2 mb-2">
-              <Building2 className="h-4 w-4" />
-              Unidade Operacional
-            </Label>
-            <Select value={unitId} onValueChange={setUnitId}>
-              <SelectTrigger className="w-full md:w-[300px]">
-                <SelectValue placeholder={isLoadingUnits ? "Carregando..." : "Selecione a unidade (opcional)"} />
-              </SelectTrigger>
-              <SelectContent>
-                {operationalUnits.map((unit) => (
-                  <SelectItem key={unit.id} value={unit.id}>
-                    <span className="flex items-center gap-2">
-                      <span>{unit.name}</span>
-                      {unit.city && unit.state && (
-                        <span className="text-xs text-muted-foreground">
-                          ({unit.city}/{unit.state})
-                        </span>
-                      )}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              Associe este registro a uma unidade operacional
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label>Tipo de Veículo *</Label>
-              <Select value={vehicleType} onValueChange={setVehicleType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vehicleTypes.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Combustível *</Label>
-              <Select value={fuelType} onValueChange={setFuelType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {fuelTypes.map((fuel) => (
-                    <SelectItem key={fuel.value} value={fuel.value}>
-                      {fuel.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Quantidade (Litros) *</Label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Mês/Ano</Label>
-              <Input
-                type="month"
-                value={monthYear}
-                onChange={(e) => setMonthYear(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end mt-4">
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Adicionar
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Data Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Registros de Consumo</CardTitle>
-          <CardDescription>
-            {records.length} registro(s) encontrado(s)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center h-32">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : records.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Truck className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Nenhum registro encontrado</p>
-              <p className="text-sm">Use o formulário acima para adicionar dados</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Veículo/Frota</TableHead>
-                  <TableHead>Combustível</TableHead>
-                  <TableHead className="text-right">Quantidade</TableHead>
-                  <TableHead>Período</TableHead>
-                  <TableHead className="text-right">Emissões (tCO2e)</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {records.map((record) => (
-                  <TableRow key={record.id}>
-                    <TableCell className="font-medium">
-                      {record.sourceDescription}
-                    </TableCell>
-                    <TableCell>
-                      {(record.metadata as { fuelName?: string })?.fuelName || "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {Number(record.quantity).toLocaleString("pt-BR")} {record.quantityUnit}
-                    </TableCell>
-                    <TableCell>
-                      {getMonthName(record.month)} {record.year}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {(record.emissionResults?.[0]?.co2Equivalent || 0).toFixed(4)}
-                    </TableCell>
-                    <TableCell>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" disabled={deletingId === record.id}>
-                            {deletingId === record.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                            )}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Excluir registro?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Esta ação não pode ser desfeita.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => handleDelete(record.id)}
-                              className="bg-destructive text-destructive-foreground"
-                            >
-                              Excluir
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <ActivityDataGrid
+            columns={columns}
+            data={activityData}
+            onSave={handleSave}
+            onDelete={handleDelete}
+            onRefresh={fetchActivityData}
+            isLoading={isLoadingData}
+            emptyMessage="Nenhum dado de combustão móvel registrado. Use 'Adicionar' para criar novos registros."
+            defaultNewRow={{
+              sourceDescription: "",
+              activityType: "",
+              quantity: 0,
+              quantityUnit: "litros",
+              year: currentYear,
+              notes: "",
+            }}
+          />
         </CardContent>
       </Card>
     </div>
