@@ -52,7 +52,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet, Info } from "lucide-react";
+import { Plus, Factory, Trash2, AlertCircle, Loader2, FileSpreadsheet, Info, Building2 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { getStationaryFuelTypes } from "@/lib/calculation-engine/calculators/stationary";
 import { findFuelName } from "@/lib/constants/emission-factors";
@@ -60,7 +60,16 @@ import { ExcelImportModal } from "@/components/import/excel-import-modal";
 import { CalculationDetailsModal } from "@/components/calculation/calculation-details-modal";
 import Link from "next/link";
 
+interface OperationalUnit {
+  id: string;
+  name: string;
+  type: string;
+  state?: string;
+  city?: string;
+}
+
 const formSchema = z.object({
+  unitId: z.string().optional(),
   sourceDescription: z.string().min(3, "Descrição é obrigatória"),
   activityType: z.string().min(1, "Combustível é obrigatório"),
   quantity: z.coerce.number().positive("Quantidade deve ser maior que zero"),
@@ -193,12 +202,15 @@ export default function StationaryCombustionPage() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [selectedCalculation, setSelectedCalculation] = useState<ActivityDataRow | null>(null);
   const [isCalculationModalOpen, setIsCalculationModalOpen] = useState(false);
+  const [operationalUnits, setOperationalUnits] = useState<OperationalUnit[]>([]);
+  const [isLoadingUnits, setIsLoadingUnits] = useState(false);
 
   const currentYear = new Date().getFullYear();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      unitId: "",
       sourceDescription: "",
       activityType: "",
       quantity: 0,
@@ -208,6 +220,26 @@ export default function StationaryCombustionPage() {
       notes: "",
     },
   });
+
+  // Fetch operational units
+  const fetchUnits = useCallback(async () => {
+    try {
+      setIsLoadingUnits(true);
+      const response = await fetch("/api/units");
+      if (response.ok) {
+        const data = await response.json();
+        setOperationalUnits(data.filter((u: OperationalUnit & { is_active?: boolean }) => u.is_active !== false));
+      }
+    } catch (error) {
+      console.error("Error fetching units:", error);
+    } finally {
+      setIsLoadingUnits(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUnits();
+  }, [fetchUnits]);
 
   const availableUnits = units[selectedFuel] || units.Default;
 
@@ -273,6 +305,7 @@ export default function StationaryCombustionPage() {
       });
 
       form.reset({
+        unitId: "",
         sourceDescription: "",
         activityType: "",
         quantity: 0,
@@ -563,6 +596,45 @@ export default function StationaryCombustionPage() {
           <CardContent>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                {/* Unit Selector */}
+                <FormField
+                  control={form.control}
+                  name="unitId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        <Building2 className="h-4 w-4" />
+                        Unidade Operacional
+                      </FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder={isLoadingUnits ? "Carregando..." : "Selecione a unidade (opcional)"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {operationalUnits.map((unit) => (
+                            <SelectItem key={unit.id} value={unit.id}>
+                              <span className="flex items-center gap-2">
+                                <span>{unit.name}</span>
+                                {unit.city && unit.state && (
+                                  <span className="text-xs text-muted-foreground">
+                                    ({unit.city}/{unit.state})
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Associe este registro a uma unidade operacional
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="sourceDescription"

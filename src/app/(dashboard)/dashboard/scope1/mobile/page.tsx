@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Truck, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { Plus, Truck, Trash2, Loader2, AlertCircle, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,6 +41,15 @@ import {
 import { useInventory } from "@/contexts/inventory-context";
 import { toast } from "@/components/ui/use-toast";
 import Link from "next/link";
+
+interface OperationalUnit {
+  id: string;
+  name: string;
+  type: string;
+  state?: string;
+  city?: string;
+  is_active?: boolean;
+}
 
 const fuelTypes = [
   { value: "Gasolina Automotiva", label: "Gasolina Comum" },
@@ -82,8 +91,11 @@ export default function MobileCombustionPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [operationalUnits, setOperationalUnits] = useState<OperationalUnit[]>([]);
+  const [isLoadingUnits, setIsLoadingUnits] = useState(false);
 
   // Form state
+  const [unitId, setUnitId] = useState("");
   const [vehicleType, setVehicleType] = useState("");
   const [fuelType, setFuelType] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -108,9 +120,28 @@ export default function MobileCombustionPage() {
     }
   }, [currentInventory?.id]);
 
+  const fetchUnits = useCallback(async () => {
+    try {
+      setIsLoadingUnits(true);
+      const response = await fetch("/api/units");
+      if (response.ok) {
+        const data = await response.json();
+        setOperationalUnits(data.filter((u: OperationalUnit) => u.is_active !== false));
+      }
+    } catch (error) {
+      console.error("Error fetching units:", error);
+    } finally {
+      setIsLoadingUnits(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchRecords();
   }, [fetchRecords]);
+
+  useEffect(() => {
+    fetchUnits();
+  }, [fetchUnits]);
 
   const handleSubmit = async () => {
     if (!currentInventory?.id) {
@@ -140,6 +171,7 @@ export default function MobileCombustionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           inventoryId: currentInventory.id,
+          unitId: unitId || undefined,
           sourceDescription: vehicleType,
           fuelName: fuelType,
           quantity: parseFloat(quantity),
@@ -165,6 +197,7 @@ export default function MobileCombustionPage() {
       });
 
       // Reset form
+      setUnitId("");
       setVehicleType("");
       setFuelType("");
       setQuantity("");
@@ -279,6 +312,36 @@ export default function MobileCombustionPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Unit Selector */}
+          <div className="mb-4">
+            <Label className="flex items-center gap-2 mb-2">
+              <Building2 className="h-4 w-4" />
+              Unidade Operacional
+            </Label>
+            <Select value={unitId} onValueChange={setUnitId}>
+              <SelectTrigger className="w-full md:w-[300px]">
+                <SelectValue placeholder={isLoadingUnits ? "Carregando..." : "Selecione a unidade (opcional)"} />
+              </SelectTrigger>
+              <SelectContent>
+                {operationalUnits.map((unit) => (
+                  <SelectItem key={unit.id} value={unit.id}>
+                    <span className="flex items-center gap-2">
+                      <span>{unit.name}</span>
+                      {unit.city && unit.state && (
+                        <span className="text-xs text-muted-foreground">
+                          ({unit.city}/{unit.state})
+                        </span>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Associe este registro a uma unidade operacional
+            </p>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
               <Label>Tipo de Veículo *</Label>
