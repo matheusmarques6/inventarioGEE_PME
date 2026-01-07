@@ -16,6 +16,9 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InventorySelector } from "@/components/dashboard/inventory-selector";
 import { KPICards } from "@/components/dashboard/kpi-cards";
+import { EmissionsChart } from "@/components/dashboard/emissions-chart";
+import { ScopeDistribution } from "@/components/dashboard/scope-distribution";
+import { RecentActivity } from "@/components/dashboard/recent-activity";
 import {
   ArrowRight,
   Plus,
@@ -25,6 +28,10 @@ import {
   Leaf,
   FileText,
   Clock,
+  FileBarChart,
+  Settings,
+  Users,
+  Building2,
 } from "lucide-react";
 
 interface ActivityCount {
@@ -71,6 +78,34 @@ export default function DashboardPage() {
   const totalCategories = 18;
   const progressPercent = Math.round((completedCategories / totalCategories) * 100);
 
+  // Quick access cards similar to WayCarbon
+  const quickAccessCards = [
+    {
+      title: "Relatórios",
+      description: "Gerar e exportar relatórios",
+      href: "/dashboard/reports",
+      icon: FileBarChart,
+    },
+    {
+      title: "Unidades",
+      description: "Unidades organizacionais",
+      href: "/dashboard/units",
+      icon: Building2,
+    },
+    {
+      title: "Usuários",
+      description: "Gerenciar usuários",
+      href: "/dashboard/users",
+      icon: Users,
+    },
+    {
+      title: "Configurações",
+      description: "Configurações do sistema",
+      href: "/dashboard/settings",
+      icon: Settings,
+    },
+  ];
+
   const quickActions = [
     {
       title: "Combustão Estacionária",
@@ -111,9 +146,9 @@ export default function DashboardPage() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Página Inicial</h1>
           <p className="text-muted-foreground">
-            Visão geral do seu inventário de emissões
+            Visão geral do seu inventário de emissões de GEE
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -128,44 +163,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <KPICards />
+      {/* Quick Access Cards - Similar to WayCarbon */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {quickAccessCards.map((card) => (
+          <Link key={card.href} href={card.href}>
+            <Card className="hover-lift cursor-pointer transition-all duration-200 hover:shadow-md h-full">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="p-3 rounded-lg bg-gray-100">
+                  <card.icon className="h-8 w-8 text-gray-600" />
+                </div>
+                <div>
+                  <p className="font-semibold">{card.title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {card.description}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
 
-      {/* Quick Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ArrowRight className="h-5 w-5 text-primary" />
-            Ações Rápidas
-          </CardTitle>
-          <CardDescription>
-            Comece a adicionar dados ao seu inventário
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {quickActions.map((action) => (
-              <Link key={action.href} href={action.href}>
-                <Card className={`hover-lift cursor-pointer transition-all duration-200 border-0 ${action.bgColor}`}>
-                  <CardContent className="flex items-center gap-4 p-4">
-                    <div className={`p-2 rounded-lg bg-white shadow-sm`}>
-                      <action.icon className={`h-6 w-6 ${action.color}`} />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">{action.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {action.description}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Current Inventory Status */}
+      {/* Current Inventory Status Card */}
       {isLoading ? (
         <Card>
           <CardHeader>
@@ -177,29 +196,14 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : currentInventory ? (
-        <Card>
-          <CardHeader>
+        <Card className="border-l-4 border-l-primary">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-primary" />
-                  {currentInventory.name}
-                </CardTitle>
-                <CardDescription>
-                  Ano base: {currentInventory.baseYear} | GWP: {currentInventory.gwpReference}
-                </CardDescription>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                Última atualização: recentemente
               </div>
-              <Link href={`/dashboard/inventories/${currentInventory.id}`}>
-                <Button variant="outline" size="sm">
-                  Ver detalhes
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <Badge
                   variant={currentInventory.status === "DRAFT" ? "secondary" : "success"}
                 >
@@ -208,20 +212,31 @@ export default function DashboardPage() {
                    currentInventory.status === "VERIFIED" ? "Verificado" :
                    currentInventory.status}
                 </Badge>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  Atualizado recentemente
-                </div>
+                <Link href={`/dashboard/inventories`}>
+                  <Button variant="outline" size="sm">
+                    Inventário de GEE {currentInventory.baseYear}
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {currentInventory.name}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Em tonelada de CO₂ equivalente (tCO₂e)
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-sm text-muted-foreground">Progresso estimado</p>
+                <p className="text-sm text-muted-foreground">Progresso</p>
                 <p className="text-2xl font-bold tabular-nums">{progressPercent}%</p>
               </div>
             </div>
-
             <Progress value={progressPercent} className="h-2 mb-4" />
-
-            <div className="grid grid-cols-3 gap-4 text-center text-sm">
+            <div className="grid grid-cols-4 gap-4 text-center text-sm">
               <div className="p-3 bg-gray-50 rounded-lg">
                 <p className="text-muted-foreground">Registros</p>
                 <p className="font-semibold text-lg tabular-nums">
@@ -245,7 +260,11 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-muted-foreground">Referência</p>
+                <p className="text-muted-foreground">Ano Base</p>
+                <p className="font-semibold text-lg">{currentInventory.baseYear}</p>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-muted-foreground">GWP</p>
                 <p className="font-semibold text-lg">{currentInventory.gwpReference}</p>
               </div>
             </div>
@@ -272,6 +291,54 @@ export default function DashboardPage() {
           </div>
         </Card>
       )}
+
+      {/* KPI Cards */}
+      <KPICards />
+
+      {/* Charts Section - Emissions by Category and Scope Distribution */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <EmissionsChart />
+        </div>
+        <div className="space-y-6">
+          <ScopeDistribution />
+          <RecentActivity />
+        </div>
+      </div>
+
+      {/* Quick Actions for Data Entry */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ArrowRight className="h-5 w-5 text-primary" />
+            Entrada de Dados
+          </CardTitle>
+          <CardDescription>
+            Adicione dados de atividade ao seu inventário
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {quickActions.map((action) => (
+              <Link key={action.href} href={action.href}>
+                <Card className={`hover-lift cursor-pointer transition-all duration-200 border-0 ${action.bgColor}`}>
+                  <CardContent className="flex items-center gap-4 p-4">
+                    <div className={`p-2 rounded-lg bg-white shadow-sm`}>
+                      <action.icon className={`h-6 w-6 ${action.color}`} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{action.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {action.description}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
